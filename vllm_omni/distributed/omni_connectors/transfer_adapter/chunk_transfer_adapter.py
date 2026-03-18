@@ -238,9 +238,6 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
         if is_finished:
             self.code_prompt_token_ids.pop(request_id, None)
-            cached_ic = getattr(self, "_cached_ic", None)
-            if cached_ic is not None:
-                cached_ic.pop(request_id, None)
 
     ########################################################################
     # Cleanup
@@ -276,10 +273,6 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         self.request_payload.pop(external_req_id, None)
         self.code_prompt_token_ids.pop(external_req_id, None)
 
-        cached_ic = getattr(self, "_cached_ic", None)
-        if cached_ic is not None:
-            cached_ic.pop(external_req_id, None)
-
     ########################################################################
     # Schedule Helper
     ########################################################################
@@ -302,7 +295,6 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         )
         while len(running_queue) > self.scheduler_max_num_seqs:
             request = running_queue.pop()
-            request.status = RequestStatus.PREEMPTED
             waiting_queue.prepend_requests([request])
 
     def restore_queues(self, waiting_queue: Any, running_queue: list[Request]) -> None:

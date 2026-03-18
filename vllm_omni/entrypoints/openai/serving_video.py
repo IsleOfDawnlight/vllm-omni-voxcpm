@@ -19,9 +19,10 @@ from vllm_omni.entrypoints.openai.protocol.videos import (
     VideoGenerationRequest,
     VideoGenerationResponse,
 )
-from vllm_omni.entrypoints.openai.utils import get_stage_type, parse_lora_request
 from vllm_omni.entrypoints.openai.video_api_utils import encode_video_base64
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams, OmniSamplingParams, OmniTextPrompt
+from vllm_omni.lora.request import LoRARequest
+from vllm_omni.lora.utils import stable_lora_int_id
 
 logger = init_logger(__name__)
 
@@ -160,20 +161,38 @@ class OmniOpenAIServingVideo:
 
     @staticmethod
     def _apply_lora(lora_body: Any, gen_params: OmniDiffusionSamplingParams) -> None:
-        try:
-            lora_request, lora_scale = parse_lora_request(lora_body)
-        except ValueError as e:
+        if lora_body is None:
+            return
+        if not isinstance(lora_body, dict):
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST.value,
-                detail=str(e),
-            ) from e
+                detail="Invalid lora field: expected an object.",
+            )
+        lora_name = lora_body.get("name") or lora_body.get("lora_name") or lora_body.get("adapter")
+        lora_path = (
+            lora_body.get("local_path")
+            or lora_body.get("path")
+            or lora_body.get("lora_path")
+            or lora_body.get("lora_local_path")
+        )
+        lora_scale = lora_body.get("scale")
+        if lora_scale is None:
+            lora_scale = lora_body.get("lora_scale")
+        lora_int_id = lora_body.get("int_id")
+        if lora_int_id is None:
+            lora_int_id = lora_body.get("lora_int_id")
+        if lora_int_id is None and lora_path:
+            lora_int_id = stable_lora_int_id(str(lora_path))
 
-        if lora_request is None:
-            return
+        if not lora_name or not lora_path:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST.value,
+                detail="Invalid lora object: both name and path are required.",
+            )
 
-        gen_params.lora_request = lora_request
+        gen_params.lora_request = LoRARequest(str(lora_name), int(lora_int_id), str(lora_path))
         if lora_scale is not None:
-            gen_params.lora_scale = lora_scale
+            gen_params.lora_scale = float(lora_scale)
 
     async def _run_generation(
         self,
@@ -181,26 +200,44 @@ class OmniOpenAIServingVideo:
         gen_params: OmniDiffusionSamplingParams,
         request_id: str,
     ) -> Any:
+        has_stage_list = hasattr(self._engine_client, "stage_list")
+        logger.info(
+            "Video generation routing: stage_configs=%s, has_stage_list=%s, engine_type=%s",
+            "present" if self._stage_configs else "missing",
+            has_stage_list,
+            type(self._engine_client).__name__,
+        )
         stage_configs = self._stage_configs or getattr(self._engine_client, "stage_configs", None)
 
         if not stage_configs:
-            raise HTTPException(
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
-                detail="Stage configs not found. Start server with an omni diffusion model.",
-            )
-
-        # Video generation endpoint only supports diffusion stages.
-        for stage in stage_configs:
-            stage_type = get_stage_type(stage)
-            if stage_type != "diffusion":
+            if not hasattr(self._engine_client, "stage_list"):
                 raise HTTPException(
                     status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
-                    detail=f"Video generation only supports diffusion stages, found '{stage_type}' stage.",
+                    detail="Stage configs not found. Start server with an omni diffusion model.",
                 )
+
+        # Video generation endpoint only supports diffusion stages.
+        if stage_configs:
+            for stage in stage_configs:
+                # Extract stage_type: dicts and OmegaConf objects use .get(), others use getattr
+                if hasattr(stage, "get"):
+                    stage_type = stage.get("stage_type", "llm")
+                else:
+                    stage_type = getattr(stage, "stage_type", "llm")
+
+                if stage_type != "diffusion":
+                    raise HTTPException(
+                        status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
+                        detail=f"Video generation only supports diffusion stages, found '{stage_type}' stage.",
+                    )
 
         # Common generation logic for both paths
         engine_client = cast(AsyncOmni, self._engine_client)
-        sampling_params_list: list[OmniSamplingParams] = [gen_params for _ in stage_configs]
+        stage_list = getattr(engine_client, "stage_list", None)
+        if isinstance(stage_list, list):
+            sampling_params_list: list[OmniSamplingParams] = [gen_params for _ in stage_list]
+        else:
+            sampling_params_list = [gen_params]
 
         result = None
         async for output in engine_client.generate(

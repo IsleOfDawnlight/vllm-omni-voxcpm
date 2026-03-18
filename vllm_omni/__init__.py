@@ -24,7 +24,10 @@ except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
 from vllm_omni.transformers_utils import configs as _configs  # noqa: F401, E402
 
 from .config import OmniModelConfig
-from .entrypoints import AsyncOmni, Omni
+from .entrypoints.async_omni import AsyncOmni
+
+# Main entry points
+from .entrypoints.omni import Omni
 
 from .version import __version__, __version_tuple__  # isort:skip
 

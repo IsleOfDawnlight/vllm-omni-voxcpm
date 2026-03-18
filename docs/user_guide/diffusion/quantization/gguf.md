@@ -22,16 +22,10 @@
 CLI (examples/offline_inference/text_to_image/text_to_image.py)
   |
   v
-Omni (vllm_omni/entrypoints/__init__.py)
+Omni (vllm_omni/entrypoints/omni.py)
   |
   v
-AsyncOmniEngine
-  |
-  v
-Orchestrator
-  |
-  v
-StageDiffusionClient
+OmniStage (diffusion)
   |
   v
 DiffusionWorker
@@ -70,13 +64,7 @@ _generate_with_async_omni
 AsyncOmni
   |
   v
-AsyncOmniEngine
-  |
-  v
-Orchestrator
-  |
-  v
-StageDiffusionClient
+DiffusionEngine
   |
   v
 OmniRequestOutput

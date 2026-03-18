@@ -1,10 +1,8 @@
-import argparse
-import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
 import vllm.envs as envs
-from vllm.engine.arg_utils import EngineArgs
+from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.logger import init_logger
 from vllm.transformers_utils.gguf_utils import is_gguf
 
@@ -300,8 +298,8 @@ class AsyncOmniEngineArgs(AsyncEngineArgs):
         self.hf_config_path = _maybe_prepare_model_hf_config_path(self.model, self.hf_config_path)
 
         # Keep compatibility when async args are constructed from partial payloads.
-        language_model_only = getattr(self, "language_model_only", False)
         limit_mm_per_prompt = getattr(self, "limit_mm_per_prompt", {})
+        language_model_only = getattr(self, "language_model_only", False)
         enable_mm_embeds = getattr(self, "enable_mm_embeds", False)
         interleave_mm_strings = getattr(self, "interleave_mm_strings", False)
         media_io_kwargs = getattr(self, "media_io_kwargs", {})

@@ -179,7 +179,7 @@ class NPUARModelRunner(OmniNPUModelRunner):
                 num_scheduled_tokens_np = np.array(tokens, dtype=np.int32)
                 max_num_scheduled_tokens = int(num_scheduled_tokens_np.max())
 
-                logits_indices, spec_decode_metadata = self._unpack_prepare_inputs_result(
+                ogits_indices, spec_decode_metadata = self._unpack_prepare_inputs_result(
                     self._prepare_inputs(
                         scheduler_output,
                         num_scheduled_tokens_np,
