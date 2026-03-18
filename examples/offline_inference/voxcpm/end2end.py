@@ -1,10 +1,4 @@
-"""Offline inference demo for VoxCPM via vLLM Omni.
-
-Supports:
-- text-only synthesis
-- voice cloning with reference audio + transcript
-- full pipeline or split latent/VAE stage configs
-"""
+"""Offline split-stage VoxCPM inference example for vLLM Omni."""
 
 import os
 import time
@@ -21,16 +15,7 @@ from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm_omni import Omni
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_FULL_STAGE_CONFIG = REPO_ROOT / "vllm_omni" / "model_executor" / "stage_configs" / "voxcpm_full.yaml"
-DEFAULT_SPLIT_STAGE_CONFIG = REPO_ROOT / "vllm_omni" / "model_executor" / "stage_configs" / "voxcpm.yaml"
-
-
-def _resolve_stage_config(args) -> str:
-    if args.stage_configs_path:
-        return args.stage_configs_path
-    if args.stage_mode == "split":
-        return str(DEFAULT_SPLIT_STAGE_CONFIG)
-    return str(DEFAULT_FULL_STAGE_CONFIG)
+DEFAULT_STAGE_CONFIG = REPO_ROOT / "vllm_omni" / "model_executor" / "stage_configs" / "voxcpm.yaml"
 
 
 def _build_prompt(args) -> dict[str, Any]:
@@ -46,10 +31,6 @@ def _build_prompt(args) -> dict[str, Any]:
         additional_information["ref_audio"] = [args.ref_audio]
     if args.ref_text:
         additional_information["ref_text"] = [args.ref_text]
-    if args.normalize:
-        additional_information["normalize"] = [True]
-    if args.denoise:
-        additional_information["denoise"] = [True]
 
     return {
         "prompt_token_ids": [1],
@@ -85,7 +66,7 @@ def _save_wav(mm: dict[str, Any], output_dir: Path, request_id: str) -> Path:
 
 
 def parse_args():
-    parser = FlexibleArgumentParser(description="VoxCPM offline inference with vLLM Omni")
+    parser = FlexibleArgumentParser(description="Offline split-stage VoxCPM inference with vLLM Omni")
     parser.add_argument(
         "--model",
         type=str,
@@ -95,7 +76,7 @@ def parse_args():
     parser.add_argument(
         "--text",
         type=str,
-        default="This is a VoxCPM synthesis example running on vLLM Omni.",
+        default="This is a split-stage VoxCPM synthesis example running on vLLM Omni.",
         help="Text to synthesize.",
     )
     parser.add_argument(
@@ -111,17 +92,10 @@ def parse_args():
         help="Transcript of the reference audio.",
     )
     parser.add_argument(
-        "--stage-mode",
-        type=str,
-        default="full",
-        choices=["full", "split"],
-        help="Use full pipeline or split latent/VAE stage config.",
-    )
-    parser.add_argument(
         "--stage-configs-path",
         type=str,
-        default=None,
-        help="Override stage config YAML path.",
+        default=str(DEFAULT_STAGE_CONFIG),
+        help="Stage config YAML path. Defaults to the split-stage VoxCPM config.",
     )
     parser.add_argument(
         "--cfg-value",
@@ -146,16 +120,6 @@ def parse_args():
         type=int,
         default=4096,
         help="Maximum generated token length.",
-    )
-    parser.add_argument(
-        "--normalize",
-        action="store_true",
-        help="Enable waveform normalization in full-pipeline mode.",
-    )
-    parser.add_argument(
-        "--denoise",
-        action="store_true",
-        help="Enable waveform denoising in full-pipeline mode.",
     )
     parser.add_argument(
         "--output-dir",
@@ -185,18 +149,16 @@ def parse_args():
 
 
 def main(args) -> None:
-    stage_config = _resolve_stage_config(args)
     prompt = _build_prompt(args)
     output_dir = Path(args.output_dir)
 
     print(f"Model: {args.model}")
-    print(f"Stage config: {stage_config}")
-    print(f"Stage mode: {args.stage_mode}")
+    print(f"Stage config: {args.stage_configs_path}")
     print(f"Voice cloning: {'enabled' if args.ref_audio else 'disabled'}")
 
     omni = Omni(
         model=args.model,
-        stage_configs_path=stage_config,
+        stage_configs_path=args.stage_configs_path,
         log_stats=args.log_stats,
         stage_init_timeout=args.stage_init_timeout,
     )

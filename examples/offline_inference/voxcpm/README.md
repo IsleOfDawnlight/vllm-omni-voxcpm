@@ -1,12 +1,12 @@
 # VoxCPM
 
-This directory contains an offline demo for running a native VoxCPM model with vLLM Omni.
+This directory contains the minimal offline example for running native VoxCPM in vLLM Omni on the `pure_voxcpm` branch.
 
-It supports:
+It covers:
 
+- split-stage inference with `vllm_omni/model_executor/stage_configs/voxcpm.yaml`
 - text-only synthesis
 - voice cloning with `ref_audio` + `ref_text`
-- both the single-stage config (`voxcpm_full.yaml`) and the split latent/VAE config (`voxcpm.yaml`)
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ pip install soundfile
 
 ## Model Path
 
-Pass the native VoxCPM model directory directly. The `config.json` can stay in VoxCPM native format; `vllm-omni` will render an HF-compatible config automatically at runtime.
+Pass the native VoxCPM model directory directly. The original VoxCPM `config.json` can stay in native format. `vllm-omni` will render the HF-compatible config it needs at runtime.
 
 ```bash
 export VOXCPM_MODEL=/path/to/voxcpm-model
@@ -38,48 +38,37 @@ export VOXCPM_MODEL=/path/to/voxcpm-model
 
 ## Quick Start
 
-Text-only synthesis with the default full-pipeline stage config:
+Text-only synthesis:
 
 ```bash
-python end2end.py \
+python examples/offline_inference/voxcpm/end2end.py \
   --model "$VOXCPM_MODEL" \
-  --text "This is a VoxCPM synthesis example running on vLLM Omni."
+  --text "This is a split-stage VoxCPM synthesis example running on vLLM Omni."
 ```
 
 Voice cloning:
 
 ```bash
-python end2end.py \
+python examples/offline_inference/voxcpm/end2end.py \
   --model "$VOXCPM_MODEL" \
   --text "This sentence is synthesized with a cloned voice." \
   --ref-audio /path/to/reference.wav \
   --ref-text "Transcript of the reference audio."
 ```
 
-Use the split latent/VAE pipeline:
-
-```bash
-python end2end.py \
-  --model "$VOXCPM_MODEL" \
-  --stage-mode split \
-  --text "Run VoxCPM with the split stage config."
-```
-
 Generated audio is saved to `output_audio/` by default.
 
 ## Useful Arguments
 
-- `--stage-mode full|split`: choose `voxcpm_full.yaml` or `voxcpm.yaml`
-- `--stage-configs-path`: override the stage config path explicitly
+- `--stage-configs-path`: override the split-stage config path explicitly
 - `--cfg-value`: guidance value passed to VoxCPM
 - `--inference-timesteps`: number of diffusion timesteps
 - `--min-len`: minimum token length
 - `--max-new-tokens`: maximum token length
-- `--normalize`: enable normalization in full-pipeline mode
-- `--denoise`: enable denoising in full-pipeline mode
 
 ## Notes
 
-- `full` mode is the simplest option and is the recommended starting point.
-- `split` mode is useful when you want to run the latent generator and audio VAE as separate stages.
+- This branch only keeps the split-stage `latent_generator -> vae` pipeline.
+- It does not include the single-stage `voxcpm_full.yaml` path.
+- It does not include the OpenAI-compatible online speech serving adaptation.
 - Voice cloning requires both `--ref-audio` and `--ref-text`.
