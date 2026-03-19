@@ -10,6 +10,11 @@ from vllm.transformers_utils.gguf_utils import is_gguf
 
 from vllm_omni.config import OmniModelConfig
 from vllm_omni.plugins import load_omni_general_plugins
+from vllm_omni.model_executor.models.voxcpm.configuration_voxcpm import VoxCPMConfig
+from vllm_omni.model_executor.models.voxcpm.native_config import (
+    detect_native_voxcpm_model_type,
+    ensure_hf_compatible_voxcpm_config,
+)
 
 logger = init_logger(__name__)
 
@@ -29,10 +34,19 @@ def _register_omni_hf_configs() -> None:
     try:
         AutoConfig.register("qwen3_tts", Qwen3TTSConfig)
         AutoConfig.register("cosyvoice3", CosyVoice3Config)
+        AutoConfig.register("voxcpm", VoxCPMConfig)
     except ValueError:
         # Already registered elsewhere; ignore.
         return
 
+def _maybe_prepare_model_hf_config_path(model: str, hf_config_path: str | None) -> str | None:
+    if hf_config_path:
+        return hf_config_path
+
+    if detect_native_voxcpm_model_type(model) == "voxcpm":
+        return ensure_hf_compatible_voxcpm_config(model)
+
+    return hf_config_path
 
 def register_omni_models_to_vllm():
     from vllm.model_executor.models import ModelRegistry
@@ -121,6 +135,7 @@ class OmniEngineArgs(EngineArgs):
 
         # register omni models to avoid model not found error
         self._ensure_omni_models_registered()
+        self.hf_config_path = _maybe_prepare_model_hf_config_path(self.model, self.hf_config_path)
 
         # Keep compatibility when async args are constructed from partial payloads.
         language_model_only = getattr(self, "language_model_only", False)

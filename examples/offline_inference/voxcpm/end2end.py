@@ -21,7 +21,6 @@ from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm_omni import Omni
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_FULL_STAGE_CONFIG = REPO_ROOT / "vllm_omni" / "model_executor" / "stage_configs" / "voxcpm_full.yaml"
 DEFAULT_SPLIT_STAGE_CONFIG = REPO_ROOT / "vllm_omni" / "model_executor" / "stage_configs" / "voxcpm.yaml"
 
 
