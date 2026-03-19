@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import vllm.envs as envs
-from vllm.engine.arg_utils import EngineArgs
+from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.logger import init_logger
 from vllm.transformers_utils.gguf_utils import is_gguf
 
