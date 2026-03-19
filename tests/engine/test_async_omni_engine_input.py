@@ -61,3 +61,32 @@ def test_build_add_request_message_preserves_additional_information():
     assert request.additional_information.entries["text"].list_data == ["hello world"]
     assert request.additional_information.entries["speaker"].list_data == ["vivian"]
     output_processor.add_request.assert_called_once()
+
+
+def test_build_add_request_message_allows_supported_tasks_override():
+    engine = object.__new__(AsyncOmniEngine)
+    params = SamplingParams(max_tokens=8)
+    engine.default_sampling_params_list = [params]
+    engine.stage_metadata = [{"stage_type": "llm"}]
+    engine.supported_tasks = ("speech",)
+
+    input_processor = Mock()
+    input_processor.process_inputs.return_value = _make_engine_core_request()
+    engine.input_processor = input_processor
+
+    output_processor = Mock()
+    engine.output_processors = [output_processor]
+
+    prompt = {"prompt_token_ids": [1, 1, 1]}
+
+    engine._build_add_request_message(
+        request_id="req-1",
+        prompt=prompt,
+        sampling_params_list=[params],
+        final_stage_id=0,
+        arrival_time=0.0,
+        supported_tasks_override=("generate",),
+    )
+
+    process_inputs_call = input_processor.process_inputs.call_args.kwargs
+    assert process_inputs_call["supported_tasks"] == ("generate",)
