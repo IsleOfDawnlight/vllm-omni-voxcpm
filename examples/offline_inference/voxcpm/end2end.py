@@ -166,8 +166,21 @@ def main(args) -> None:
     t_start = time.perf_counter()
     saved_paths: list[Path] = []
     for stage_outputs in omni.generate([prompt]):
-        for output in stage_outputs.request_output:
-            mm = output.outputs[0].multimodal_output
+        request_outputs = getattr(stage_outputs, "request_output", None)
+        if request_outputs is None:
+            raise ValueError("No request_output found in OmniRequestOutput")
+
+        if isinstance(request_outputs, list):
+            output_items = request_outputs
+        else:
+            output_items = [request_outputs]
+
+        for output in output_items:
+            mm = getattr(output, "multimodal_output", None)
+            if not mm and getattr(output, "outputs", None):
+                mm = getattr(output.outputs[0], "multimodal_output", None)
+            if not mm:
+                mm = stage_outputs.multimodal_output
             saved_paths.append(_save_wav(mm, output_dir, output.request_id))
     elapsed = time.perf_counter() - t_start
 
