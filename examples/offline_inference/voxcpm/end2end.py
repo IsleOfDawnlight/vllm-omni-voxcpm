@@ -236,7 +236,6 @@ Examples:
         default=4096,
         help="Maximum generated token length.",
     )
-
     parser.add_argument(
         "--stage-init-timeout",
         type=int,
@@ -248,7 +247,6 @@ Examples:
         action="store_true",
         help="Enable vLLM Omni stats logging.",
     )
-
     args = parser.parse_args()
 
     if not args.model:
