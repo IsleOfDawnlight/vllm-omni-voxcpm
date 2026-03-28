@@ -1,0 +1,3 @@
+{"audio": "examples/offline_inference/voxcpm/example.wav", "text": "This is the first VoxCPM batch example."}
+{"audio": "examples/offline_inference/voxcpm/example.wav", "text": "This is the second VoxCPM batch example."}
+{"audio": "examples/offline_inference/voxcpm/example.wav", "text": "This is the third VoxCPM batch example."}

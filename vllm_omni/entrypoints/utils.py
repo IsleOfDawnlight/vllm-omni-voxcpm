@@ -222,17 +222,22 @@ def resolve_model_config_path(model: str) -> str:
             )
 
     default_config_path = current_omni_platform.get_default_stage_config_path()
-    model_type_str = f"{model_type}.yaml"
-    complete_config_path = PROJECT_ROOT / default_config_path / model_type_str
-    if os.path.exists(complete_config_path):
-        return str(complete_config_path)
+    preferred_model_type_names = [model_type]
+    if model_type == "voxcpm":
+        preferred_model_type_names.insert(0, "voxcpm_async_chunk")
+
+    for preferred_name in preferred_model_type_names:
+        complete_config_path = PROJECT_ROOT / default_config_path / f"{preferred_name}.yaml"
+        if os.path.exists(complete_config_path):
+            return str(complete_config_path)
 
     # Fall back to default config
-    stage_config_file = f"vllm_omni/model_executor/stage_configs/{model_type}.yaml"
-    stage_config_path = PROJECT_ROOT / stage_config_file
-    if not os.path.exists(stage_config_path):
-        return None
-    return str(stage_config_path)
+    for preferred_name in preferred_model_type_names:
+        stage_config_file = f"vllm_omni/model_executor/stage_configs/{preferred_name}.yaml"
+        stage_config_path = PROJECT_ROOT / stage_config_file
+        if os.path.exists(stage_config_path):
+            return str(stage_config_path)
+    return None
 
 
 def load_stage_configs_from_model(model: str, base_engine_args: dict | None = None) -> list:

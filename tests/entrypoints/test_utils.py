@@ -341,7 +341,7 @@ class TestResolveModelConfigPath:
         config_path = resolve_model_config_path(str(model_dir))
 
         assert config_path is not None
-        assert config_path.endswith("vllm_omni/model_executor/stage_configs/voxcpm.yaml")
+        assert config_path.endswith("vllm_omni/model_executor/stage_configs/voxcpm_async_chunk.yaml")
 
     def test_resolves_native_voxcpm_to_npu_stage_yaml(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         config_dict = _build_native_voxcpm_config()
@@ -371,4 +371,4 @@ class TestResolveModelConfigPath:
         config_path = resolve_model_config_path(str(model_dir))
 
         assert config_path is not None
-        assert config_path.endswith("vllm_omni/platforms/npu/stage_configs/voxcpm.yaml")
+        assert config_path.endswith("vllm_omni/platforms/npu/stage_configs/voxcpm_async_chunk.yaml")

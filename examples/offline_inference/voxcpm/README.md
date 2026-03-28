@@ -4,10 +4,11 @@ This directory contains the minimal offline example for running native VoxCPM in
 
 It covers:
 
-- split-stage inference with `vllm_omni/model_executor/stage_configs/voxcpm.yaml`
+- split-stage inference with `vllm_omni/model_executor/stage_configs/voxcpm_async_chunk.yaml`
 - text-only synthesis
 - voice cloning with `ref_audio` + `ref_text`
 - batch processing with voice cloning support
+- OpenAI-compatible speech serving input adaptation for VoxCPM
 
 ## Prerequisites
 
@@ -154,9 +155,9 @@ This design ensures:
 
 ## Notes
 
-- This branch only keeps the split-stage `latent_generator -> vae` pipeline.
+- This branch keeps the split-stage `latent_generator -> vae` pipeline and defaults to the async-chunk stage config.
 - It does not include the single-stage `voxcpm_full.yaml` path.
-- It does not include the OpenAI-compatible online speech serving adaptation.
+- The OpenAI-compatible `/v1/audio/speech` path now accepts VoxCPM requests, but the model still relies on the split-stage native runtime underneath.
 - Voice cloning requires both `--prompt-audio` and `--prompt-text` (or audio/text in JSONL).
 - Batch processing with JSONL allows individual reference audio per text sample.
 - The batch processing implementation follows VoxCPM's CLI patterns from `VoxCPM/src/voxcpm/cli.py`.

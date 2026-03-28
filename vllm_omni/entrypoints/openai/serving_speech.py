@@ -31,6 +31,7 @@ logger = init_logger(__name__)
 
 # TTS Configuration
 _TTS_MODEL_STAGES: set[str] = {"qwen3_tts", "fish_speech_slow_ar"}
+_VOXCPM_TTS_MODEL_ARCHS: set[str] = {"VoxCPMForConditionalGeneration"}
 _TTS_LANGUAGES: set[str] = {
     "Auto",
     "Chinese",
@@ -143,6 +144,10 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         self._is_fish_speech = (
             self._tts_stage is not None and getattr(self._tts_stage, "model_stage", None) == "fish_speech_slow_ar"
         )
+        self._is_voxcpm = (
+            self._tts_stage is not None
+            and getattr(getattr(self._tts_stage, "engine_args", None), "model_arch", None) in _VOXCPM_TTS_MODEL_ARCHS
+        )
         self._fish_speech_tokenizer = None
 
         # Cache TTS configuration values (computed once, reused per request)
@@ -200,6 +205,12 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         """Find and return the TTS stage config, or None if not found."""
         for stage in self.engine_client.stage_configs:
             if stage.engine_args.model_stage in _TTS_MODEL_STAGES:
+                return stage
+        for stage in self.engine_client.stage_configs:
+            engine_args = getattr(stage, "engine_args", None)
+            if getattr(engine_args, "model_arch", None) not in _VOXCPM_TTS_MODEL_ARCHS:
+                continue
+            if getattr(engine_args, "model_stage", None) in {"latent_generator", "latent", "ar_dit"}:
                 return stage
         return None
 
@@ -493,7 +504,43 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
     def _is_tts_model(self) -> bool:
         """Check if the current model is a supported TTS model."""
-        return any(stage.engine_args.model_stage in _TTS_MODEL_STAGES for stage in self.engine_client.stage_configs)
+        return self._find_tts_stage() is not None
+
+    def _validate_voxcpm_request(self, request: OpenAICreateSpeechRequest) -> str | None:
+        """Validate VoxCPM-specific speech request parameters."""
+        if not request.input or not request.input.strip():
+            return "Input text cannot be empty"
+
+        if (request.ref_audio is None) != (request.ref_text is None):
+            return "VoxCPM voice cloning requires both 'ref_audio' and 'ref_text'"
+
+        if request.voice is not None:
+            return "VoxCPM does not support named 'voice'; use ref_audio/ref_text for voice cloning"
+
+        unsupported_params = []
+        if request.task_type is not None:
+            unsupported_params.append("task_type")
+        if request.language is not None:
+            unsupported_params.append("language")
+        if request.instructions is not None:
+            unsupported_params.append("instructions")
+        if request.x_vector_only_mode is not None:
+            unsupported_params.append("x_vector_only_mode")
+        if request.initial_codec_chunk_frames is not None:
+            unsupported_params.append("initial_codec_chunk_frames")
+        if unsupported_params:
+            return (
+                "VoxCPM does not support the following Speech API parameters: "
+                + ", ".join(unsupported_params)
+            )
+
+        if request.max_new_tokens is not None:
+            if request.max_new_tokens < _TTS_MAX_NEW_TOKENS_MIN:
+                return f"max_new_tokens must be at least {_TTS_MAX_NEW_TOKENS_MIN}"
+            if request.max_new_tokens > _TTS_MAX_NEW_TOKENS_MAX:
+                return f"max_new_tokens cannot exceed {_TTS_MAX_NEW_TOKENS_MAX}"
+
+        return None
 
     def _validate_tts_request(self, request: OpenAICreateSpeechRequest) -> str | None:
         """Validate TTS request parameters. Returns error message or None."""
@@ -775,6 +822,16 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
         return params
 
+    def _build_voxcpm_params(self, request: OpenAICreateSpeechRequest) -> dict[str, Any]:
+        """Build input parameters for VoxCPM speech generation."""
+        params: dict[str, Any] = {
+            "text": [request.input],
+            "max_new_tokens": [request.max_new_tokens or 4096],
+        }
+        if request.ref_text is not None:
+            params["ref_text"] = [request.ref_text]
+        return params
+
     def _build_fish_speech_prompt(
         self,
         request: OpenAICreateSpeechRequest,
@@ -866,6 +923,20 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 ref_audio_data = (wav_list, sr)
             prompt = self._build_fish_speech_prompt(request, ref_audio_data=ref_audio_data)
             tts_params = {}
+        elif self._is_voxcpm:
+            validation_error = self._validate_voxcpm_request(request)
+            if validation_error:
+                raise ValueError(validation_error)
+
+            tts_params = self._build_voxcpm_params(request)
+            if request.ref_audio is not None:
+                wav_list, sr = await self._resolve_ref_audio(request.ref_audio)
+                tts_params["ref_audio"] = [[wav_list, sr]]
+
+            prompt = {
+                "prompt_token_ids": [1],
+                "additional_information": tts_params,
+            }
         elif self._is_tts:
             validation_error = self._validate_tts_request(request)
             if validation_error:
@@ -886,6 +957,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         model_type = (
             "fish_speech"
             if self._is_fish_speech
+            else "voxcpm"
+            if self._is_voxcpm
             else tts_params.get("task_type", ["unknown"])[0]
             if self._is_tts
             else "generic"

@@ -7,20 +7,16 @@ import time
 from pathlib import Path
 from typing import Any
 
-import soundfile as sf
-import torch
-
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
-from vllm.utils.argparse_utils import FlexibleArgumentParser
-
-from vllm_omni import Omni
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_STAGE_CONFIG = REPO_ROOT / "vllm_omni" / "model_executor" / "stage_configs" / "voxcpm.yaml"
+DEFAULT_STAGE_CONFIG = REPO_ROOT / "vllm_omni" / "model_executor" / "stage_configs" / "voxcpm_async_chunk.yaml"
 
 
 def _save_wav(output_dir: Path, request_id: str, mm: dict) -> None:
+    import soundfile as sf
+    import torch
+
     audio_data = mm.get("audio", mm.get("model_outputs"))
     if audio_data is None:
         raise ValueError("No audio output found in multimodal output.")
@@ -125,6 +121,11 @@ def _build_batch_input(args) -> list[dict]:
 
 
 def parse_args():
+    try:
+        from vllm.utils.argparse_utils import FlexibleArgumentParser
+    except ImportError:
+        FlexibleArgumentParser = argparse.ArgumentParser
+
     parser = FlexibleArgumentParser(
         description="Offline split-stage VoxCPM inference with voice cloning and batch processing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -277,6 +278,8 @@ Examples:
 
 
 def main(args) -> None:
+    from vllm_omni import Omni
+
     if args.text:
         output_dir = Path(args.output).parent if args.output else Path("output_audio")
         output_dir.mkdir(parents=True, exist_ok=True)

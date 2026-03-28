@@ -224,6 +224,7 @@ datasets/
 *.json
 !apps/ComfyUI-vLLM-Omni/example_workflows/*.json
 *.jsonl
+!examples/offline_inference/voxcpm/example_batch.jsonl
 *.parquet
 
 # Output files
