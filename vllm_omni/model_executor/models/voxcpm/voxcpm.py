@@ -26,6 +26,93 @@ from vllm_omni.model_executor.stage_input_processors.voxcpm import DEFAULT_LATEN
 logger = init_logger(__name__)
 
 
+def _iter_exception_messages(exc: BaseException) -> Iterator[str]:
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        msg = str(cur)
+        if msg:
+            yield msg
+        cur = cur.__cause__ or cur.__context__
+
+
+def _is_torchcodec_load_error(exc: BaseException) -> bool:
+    combined = "\n".join(_iter_exception_messages(exc)).lower()
+    indicators = (
+        "torchcodec",
+        "load_with_torchcodec",
+        "libtorchcodec",
+        "audiodecoder",
+    )
+    return any(indicator in combined for indicator in indicators)
+
+
+def _soundfile_torchaudio_load(
+    uri: str | os.PathLike[str],
+    *,
+    frame_offset: int = 0,
+    num_frames: int = -1,
+    normalize: bool = True,
+    channels_first: bool = True,
+    format: str | None = None,
+    buffer_size: int = 4096,
+    backend: str | None = None,
+) -> tuple[torch.Tensor, int]:
+    del normalize, format, buffer_size, backend
+    try:
+        import soundfile as sf
+    except ImportError as exc:
+        raise ImportError(
+            "soundfile is required to load VoxCPM prompt audio when torchaudio "
+            "falls back to torchcodec on this platform."
+        ) from exc
+
+    audio_np, sample_rate = sf.read(uri, dtype="float32", always_2d=True)
+    if frame_offset:
+        audio_np = audio_np[frame_offset:]
+    if num_frames not in (-1, None):
+        audio_np = audio_np[:num_frames]
+
+    audio = torch.from_numpy(np.array(audio_np, copy=True))
+    if channels_first:
+        audio = audio.transpose(0, 1).contiguous()
+    return audio, int(sample_rate)
+
+
+def _build_prompt_cache_with_audio_load_fallback(
+    tts_model: Any,
+    *,
+    prompt_text: str,
+    prompt_wav_path: str,
+) -> Any:
+    try:
+        return tts_model.build_prompt_cache(
+            prompt_text=prompt_text,
+            prompt_wav_path=prompt_wav_path,
+        )
+    except Exception as exc:
+        if not _is_torchcodec_load_error(exc):
+            raise
+        logger.warning(
+            "VoxCPM prompt audio load hit torchaudio/torchcodec failure; "
+            "retrying with soundfile fallback: %s",
+            exc,
+        )
+        try:
+            import voxcpm.model.voxcpm as native_voxcpm_module
+
+            torchaudio_module = native_voxcpm_module.torchaudio
+        except Exception:
+            import torchaudio as torchaudio_module
+
+        with patch.object(torchaudio_module, "load", new=_soundfile_torchaudio_load):
+            return tts_model.build_prompt_cache(
+                prompt_text=prompt_text,
+                prompt_wav_path=prompt_wav_path,
+            )
+
+
 def _import_voxcpm_model_class():
     try:
         from voxcpm.model.voxcpm import VoxCPMModel
@@ -312,7 +399,8 @@ class _DirectVoxCPMLatentGenerator:
 
         prompt_cache = None
         if prompt_wav_path is not None and prompt_text is not None:
-            prompt_cache = self.tts_model.build_prompt_cache(
+            prompt_cache = _build_prompt_cache_with_audio_load_fallback(
+                self.tts_model,
                 prompt_text=prompt_text,
                 prompt_wav_path=prompt_wav_path,
             )
@@ -684,7 +772,8 @@ class VoxCPMForConditionalGeneration(nn.Module):
                         if req_id not in self._voxcpm_latent_patch_iters:
                             prompt_cache = None
                             if prompt_wav_path is not None and prompt_text is not None:
-                                prompt_cache = tts.build_prompt_cache(
+                                prompt_cache = _build_prompt_cache_with_audio_load_fallback(
+                                    tts,
                                     prompt_text=prompt_text,
                                     prompt_wav_path=prompt_wav_path,
                                 )

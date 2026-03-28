@@ -1,6 +1,8 @@
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
+import types
 
 import pytest
 import torch
@@ -8,6 +10,7 @@ import torch
 from vllm_omni.model_executor.models.voxcpm.voxcpm import (
     _DirectVoxCPMAudioVAE,
     _DirectVoxCPMLatentGenerator,
+    _build_prompt_cache_with_audio_load_fallback,
     _normalize_dtype_name,
     _prepare_runtime_model_dir,
     VoxCPMForConditionalGeneration,
@@ -95,6 +98,65 @@ def test_direct_latent_generator_forwards_expected_kwargs(tmp_path: Path):
     assert tts_model.generate_calls[0]["target_text"] == "hello world"
     assert tts_model.generate_calls[0]["prompt_cache"] == {"cache": True}
     assert tts_model.generate_calls[0]["cfg_value"] == 1.5
+
+
+def test_build_prompt_cache_falls_back_to_soundfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    fake_soundfile = types.ModuleType("soundfile")
+
+    def _fake_sf_read(path, dtype="float32", always_2d=True):
+        assert dtype == "float32"
+        assert always_2d is True
+        assert path.endswith("prompt.wav")
+        return [[0.1], [0.2], [0.3]], 16000
+
+    fake_soundfile.read = _fake_sf_read
+    monkeypatch.setitem(sys.modules, "soundfile", fake_soundfile)
+
+    native_voxcpm_module = types.ModuleType("voxcpm.model.voxcpm")
+    native_voxcpm_module.torchaudio = types.SimpleNamespace()
+
+    def _fail_load(*args, **kwargs):
+        raise RuntimeError("TorchCodec is required for load_with_torchcodec")
+
+    native_voxcpm_module.torchaudio.load = _fail_load
+
+    voxcpm_pkg = types.ModuleType("voxcpm")
+    voxcpm_model_pkg = types.ModuleType("voxcpm.model")
+    voxcpm_pkg.model = voxcpm_model_pkg
+    voxcpm_model_pkg.voxcpm = native_voxcpm_module
+    monkeypatch.setitem(sys.modules, "voxcpm", voxcpm_pkg)
+    monkeypatch.setitem(sys.modules, "voxcpm.model", voxcpm_model_pkg)
+    monkeypatch.setitem(sys.modules, "voxcpm.model.voxcpm", native_voxcpm_module)
+
+    class _FakeTTSModel:
+        def __init__(self):
+            self.calls = 0
+
+        def build_prompt_cache(self, *, prompt_text, prompt_wav_path):
+            self.calls += 1
+            audio, sr = native_voxcpm_module.torchaudio.load(prompt_wav_path)
+            return {
+                "prompt_text": prompt_text,
+                "shape": tuple(audio.shape),
+                "sample_rate": sr,
+            }
+
+    prompt_wav = tmp_path / "prompt.wav"
+    prompt_wav.write_bytes(b"RIFF")
+
+    tts_model = _FakeTTSModel()
+    prompt_cache = _build_prompt_cache_with_audio_load_fallback(
+        tts_model,
+        prompt_text="ref",
+        prompt_wav_path=str(prompt_wav),
+    )
+
+    assert tts_model.calls == 2
+    assert prompt_cache == {
+        "prompt_text": "ref",
+        "shape": (1, 3),
+        "sample_rate": 16000,
+    }
 
 
 def test_audio_vae_prepare_latents_for_decode():
