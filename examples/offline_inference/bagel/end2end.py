@@ -67,17 +67,6 @@ def parse_args():
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed for generation.")
     parser.add_argument(
-        "--cfg-interval",
-        type=float,
-        nargs=2,
-        default=None,
-        help="CFG interval [start, end] (default: pipeline default)",
-    )
-    parser.add_argument(
-        "--cfg-renorm-type", type=str, default=None, help="CFG renorm type: global, text_channel, channel"
-    )
-    parser.add_argument("--cfg-renorm-min", type=float, default=None, help="CFG renorm min")
-    parser.add_argument(
         "--enable-diffusion-pipeline-profiler",
         action="store_true",
         help="Enable diffusion pipeline profiler to display stage durations.",
@@ -87,12 +76,6 @@ def parse_args():
         type=str,
         default=None,
         help="Quantization method (e.g. 'fp8').",
-    )
-    parser.add_argument(
-        "--think",
-        action="store_true",
-        default=False,
-        help="Enable thinking mode: AR stage decodes <think>...</think> planning tokens before image generation.",
     )
 
     args = parser.parse_args()
@@ -216,17 +199,6 @@ def main():
 
     img_idx = 0
     for req_output in omni_outputs:
-        if args.think:
-            text_output = getattr(req_output, "text", None) or getattr(req_output, "outputs", None)
-            if text_output:
-                if isinstance(text_output, list) and text_output:
-                    for out in text_output:
-                        txt = getattr(out, "text", str(out))
-                        if txt:
-                            print(f"[Think] {txt}")
-                elif isinstance(text_output, str):
-                    print(f"[Think] {text_output}")
-
         images = getattr(req_output, "images", None)
 
         if not images:
@@ -235,7 +207,6 @@ def main():
         for j, img in enumerate(images):
             save_path = os.path.join(args.output, f"output_{img_idx}_{j}.png")
             img.save(save_path)
-            print(f"[Output] Saved image to {save_path}")
         img_idx += 1
 
     print(omni_outputs)

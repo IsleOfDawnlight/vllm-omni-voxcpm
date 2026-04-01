@@ -274,7 +274,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             logger.debug(f"[Stage-{stage_id}] Sent {connector_put_key}")
 
         if is_finished:
-            self.cleanup(request.request_id, getattr(request, "external_req_id", None))
+            self.cleanup_sender(external_req_id)
 
     ########################################################################
     # Cleanup

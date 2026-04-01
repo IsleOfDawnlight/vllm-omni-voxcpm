@@ -95,7 +95,18 @@ class OmniARScheduler(VLLMScheduler):
             return False
 
         criteria_type = self.kv_transfer_criteria.get("type")
-        stop_decode_on_trigger = self.kv_transfer_criteria.get("stop_after_transfer", True)
+        if (
+            self.kv_transfer_criteria.get("stop_after_transfer", True)
+            and request.request_id in self.transfer_triggered_requests
+        ):
+            # For split pipelines that only need the transferred KV
+            # snapshot, stop AR decode once KV extraction has completed.
+            # This frees stage-0 resources without requiring an
+            # orchestrator-side abort.
+            if request.request_id not in self.active_kv_transfers:
+                request.status = RequestStatus.FINISHED_STOPPED
+                return True
+            return False
 
         if request.request_id in self.transfer_triggered_requests:
             # Already triggered.  When stop_decode_on_trigger is True AND

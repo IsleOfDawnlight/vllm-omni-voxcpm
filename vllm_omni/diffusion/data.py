@@ -610,17 +610,6 @@ class OmniDiffusionConfig:
             # If it's neither dict nor DiffusionCacheConfig, convert to empty config
             self.cache_config = DiffusionCacheConfig()
 
-        # Auto-detect quantization from TransformerConfig if not explicitly set.
-        # This covers the case where tf_model_config is passed at construction
-        # time.  For late (post-construction) assignment, callers should use
-        # set_tf_model_config() which propagates quant_config automatically.
-        if self.quantization_config is None and self.tf_model_config.quant_config is not None:
-            self.quantization_config = self.tf_model_config.quant_config
-            logger.info(
-                "Auto-detected quantization '%s' from model config",
-                self.tf_model_config.quant_method,
-            )
-
         # Resolve quantization_config: str/dict -> QuantizationConfig via build_quant_config.
         if self.quantization_config is not None:
             if isinstance(self.quantization_config, QuantizationConfig):

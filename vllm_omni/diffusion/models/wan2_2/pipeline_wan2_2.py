@@ -316,10 +316,6 @@ class Wan22Pipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, DiffusionPipe
             enable_diffusion_pipeline_profiler=self.od_config.enable_diffusion_pipeline_profiler
         )
 
-    def _create_transformer(self, config: dict) -> WanTransformer3DModel:
-        """Create a transformer from a config dict. Subclasses may override."""
-        return create_transformer_from_config(config)
-
     @property
     def guidance_scale(self):
         return self._guidance_scale
