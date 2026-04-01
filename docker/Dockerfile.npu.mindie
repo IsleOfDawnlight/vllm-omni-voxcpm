@@ -1,0 +1,40 @@
+ARG VLLM_ASCEND_IMAGE=quay.io/ascend/vllm-ascend
+ARG VLLM_ASCEND_TAG=v0.17.0rc1
+FROM ${VLLM_ASCEND_IMAGE}:${VLLM_ASCEND_TAG}
+
+ARG APP_DIR=/vllm-workspace/vllm-omni
+WORKDIR ${APP_DIR}
+
+# 复制 vllm-omni 代码
+COPY . .
+
+# 复制 MindIE-SD 安装包（需要在构建前准备好）
+# 使用 COPY 而不是 ADD，因为 wheel 包已经编译好
+COPY MindIE-SD/dist/mindiesd-*.whl /tmp/mindiesd.whl
+
+# 设置环境变量并安装依赖
+RUN export PIP_EXTRA_INDEX_URL=https://mirrors.huaweicloud.com/ascend/repos/pypi && \
+    source /usr/local/Ascend/ascend-toolkit/set_env.sh && \
+    source /usr/local/Ascend/nnal/atb/set_env.sh && \
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib && \
+    # 安装 MindIE-SD
+    echo "Installing MindIE-SD..." && \
+    pip install /tmp/mindiesd.whl && \
+    # 验证 MindIE-SD 安装
+    python -c "import mindiesd; print(f'MindIE-SD version: {mindiesd.__version__}')" && \
+    python -c "from mindiesd.compilation import MindieSDBackend, CompilationConfig; print('MindIE-SD backend imported successfully')" && \
+    # 安装 vllm-omni
+    echo "Installing vllm-omni..." && \
+    python3 -m pip install -v -e /vllm-workspace/vllm-omni/ --no-build-isolation && \
+    # 清理临时文件
+    rm /tmp/mindiesd.whl && \
+    echo "Installation completed successfully!"
+
+# 设置环境变量
+ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+# 设置工作目录
+WORKDIR ${APP_DIR}
+
+# 默认命令
+CMD ["/bin/bash"]
