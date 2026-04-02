@@ -11,7 +11,7 @@ from vllm.logger import init_logger
 logger = init_logger(__name__)
 
 try:
-    from MindIE_SD_master.mindiesd.compilation import MindieSDBackend, CompilationConfig
+    from mindiesd.compilation import MindieSDBackend, CompilationConfig
     MINDIE_SD_AVAILABLE = True
 except ImportError:
     MINDIE_SD_AVAILABLE = False

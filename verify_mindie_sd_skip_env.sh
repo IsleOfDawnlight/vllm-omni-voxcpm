@@ -38,7 +38,7 @@ echo "Step 3: Checking PyTorch and torch_npu..."
 python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
 python -c "import torch_npu; print(f'torch_npu available: {torch.npu.is_available()}'); print(f'NPU device count: {torch.npu.device_count() if torch.npu.is_available() else 0}')"
 echo ""
-
+  
 # 检查 MindIE-SD 安装
 echo "Step 4: Checking MindIE-SD installation..."
 python -c "import mindiesd; print(f'MindIE-SD version: {mindiesd.__version__}')" 2>/dev/null || {
