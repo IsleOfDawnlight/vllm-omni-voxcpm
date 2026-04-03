@@ -50,6 +50,18 @@ python examples/offline_inference/voxcpm/end2end.py \
   --text "This is a split-stage VoxCPM synthesis example running on vLLM Omni."
 ```
 
+Optional warmup before measured runs:
+
+```bash
+python examples/offline_inference/voxcpm/end2end.py \
+  --model "$VOXCPM_MODEL" \
+  --text "This is a split-stage VoxCPM synthesis example running on vLLM Omni." \
+  --warmup-runs 1 \
+  --num-runs 3
+```
+
+`--warmup-runs` only warms up the first batch of prompts. Warmup outputs are discarded and do not count toward `--num-runs`.
+
 Voice cloning:
 
 ```bash
@@ -57,8 +69,10 @@ python examples/offline_inference/voxcpm/end2end.py \
   --model "$VOXCPM_MODEL" \
   --text "This sentence is synthesized with a cloned voice." \
   --ref-audio /path/to/reference.wav \
-  --ref-text "Transcript of the reference audio."
+  --ref-text "The exact transcript spoken in reference.wav."
 ```
+
+`--ref-text` must be the real transcript of the reference audio. Placeholder text, summary text, or mismatched text will usually degrade clone quality badly and can produce noisy/electronic output.
 
 Text batch (`--txt-prompts`, one text per line):
 
@@ -76,7 +90,7 @@ python examples/offline_inference/voxcpm/end2end.py \
   --model "$VOXCPM_MODEL" \
   --txt-prompts /path/to/prompts.txt \
   --ref-audio /path/to/reference.wav \
-  --ref-text "Transcript of the reference audio." \
+  --ref-text "The exact transcript spoken in reference.wav." \
   --batch-size 4
 ```
 
@@ -124,7 +138,7 @@ For voice cloning rows, provide `ref_audio` and `ref_text` together:
 
 ```json
 {"text": "Text-only row"}
-{"text": "Clone row", "ref_audio": "/path/to/ref.wav", "ref_text": "Reference transcript."}
+{"text": "Clone row", "ref_audio": "/path/to/ref.wav", "ref_text": "The exact transcript spoken in ref.wav."}
 ```
 
 ## Useful Arguments
@@ -133,6 +147,7 @@ For voice cloning rows, provide `ref_audio` and `ref_text` together:
 - `--txt-prompts`: load one synthesis text per line from a `.txt` file
 - `--jsonl-prompts`: load prompts from `.jsonl`, including per-item voice cloning metadata
 - `--batch-size`: requests submitted together per sync batch, or concurrent requests per streaming wave
+- `--warmup-runs`: optional warmup passes before measured runs; only the first batch is used and outputs are discarded
 - `--cfg-value`: guidance value passed to VoxCPM
 - `--inference-timesteps`: number of diffusion timesteps
 - `--min-len`: minimum token length
