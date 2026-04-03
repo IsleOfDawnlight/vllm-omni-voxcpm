@@ -3,15 +3,20 @@
 Supports both:
 - sync one-shot (Omni.generate)
 - streaming (AsyncOmni.generate with async_chunk config)
+- text-only synthesis
+- voice cloning
+- text/clone batch inputs from txt or jsonl
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +36,24 @@ DEFAULT_STAGE_SYNC = REPO_ROOT / "vllm_omni" / "model_executor" / "stage_configs
 logger = logging.getLogger(__name__)
 
 
-def _build_prompt(args, *, global_request_id: str | None = None) -> dict[str, Any]:
+@dataclass(frozen=True, slots=True)
+class PromptSpec:
+    text: str
+    label: str
+    ref_audio: str | None = None
+    ref_text: str | None = None
+
+
+def _build_prompt(
+    args,
+    *,
+    text: str,
+    ref_audio: str | None = None,
+    ref_text: str | None = None,
+    global_request_id: str | None = None,
+) -> dict[str, Any]:
     additional_information: dict[str, list[Any]] = {
-        "text": [args.text],
+        "text": [text],
         "cfg_value": [args.cfg_value],
         "inference_timesteps": [args.inference_timesteps],
         "min_len": [args.min_len],
@@ -42,10 +62,10 @@ def _build_prompt(args, *, global_request_id: str | None = None) -> dict[str, An
     if args.streaming_prefix_len is not None:
         additional_information["streaming_prefix_len"] = [args.streaming_prefix_len]
 
-    if args.ref_audio:
-        additional_information["ref_audio"] = [args.ref_audio]
-    if args.ref_text:
-        additional_information["ref_text"] = [args.ref_text]
+    if ref_audio:
+        additional_information["ref_audio"] = [ref_audio]
+    if ref_text:
+        additional_information["ref_text"] = [ref_text]
     if global_request_id is not None:
         additional_information["global_request_id"] = [global_request_id]
 
@@ -96,6 +116,105 @@ def _iter_request_multimodal_outputs(request_output: Any):
         yield mm
 
 
+def _read_non_empty_lines(path: str) -> list[str]:
+    with open(path, encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+
+def _load_prompt_specs(args) -> list[PromptSpec]:
+    specs: list[PromptSpec] = []
+
+    if args.txt_prompts is not None:
+        texts = _read_non_empty_lines(args.txt_prompts)
+        if not texts:
+            raise ValueError(f"No prompts found in {args.txt_prompts}")
+        for idx, text in enumerate(texts, start=1):
+            specs.append(
+                PromptSpec(
+                    text=text,
+                    label=f"item{idx:03d}",
+                    ref_audio=args.ref_audio,
+                    ref_text=args.ref_text,
+                )
+            )
+        return specs
+
+    if args.jsonl_prompts is not None:
+        with open(args.jsonl_prompts, encoding="utf-8") as f:
+            for line_no, raw_line in enumerate(f, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"{args.jsonl_prompts}:{line_no} is not valid JSON: {exc}") from exc
+                if not isinstance(item, dict):
+                    raise ValueError(f"{args.jsonl_prompts}:{line_no} must be a JSON object")
+
+                text = item.get("text")
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError(f"{args.jsonl_prompts}:{line_no} requires non-empty string field 'text'")
+
+                ref_audio = item.get("ref_audio", args.ref_audio)
+                ref_text = item.get("ref_text", args.ref_text)
+                if (ref_audio is None) != (ref_text is None):
+                    raise ValueError(
+                        f"{args.jsonl_prompts}:{line_no} must provide both 'ref_audio' and 'ref_text' together"
+                    )
+
+                specs.append(
+                    PromptSpec(
+                        text=text.strip(),
+                        label=f"item{len(specs) + 1:03d}",
+                        ref_audio=ref_audio,
+                        ref_text=ref_text,
+                    )
+                )
+
+        if not specs:
+            raise ValueError(f"No prompts found in {args.jsonl_prompts}")
+        return specs
+
+    specs.append(
+        PromptSpec(
+            text=args.text,
+            label="item001",
+            ref_audio=args.ref_audio,
+            ref_text=args.ref_text,
+        )
+    )
+    return specs
+
+
+def _build_prompt_for_spec(args, spec: PromptSpec, *, global_request_id: str | None = None) -> dict[str, Any]:
+    return _build_prompt(
+        args,
+        text=spec.text,
+        ref_audio=spec.ref_audio,
+        ref_text=spec.ref_text,
+        global_request_id=global_request_id,
+    )
+
+
+def _iter_batches(items: list[PromptSpec], batch_size: int):
+    for start in range(0, len(items), batch_size):
+        yield start, items[start : start + batch_size]
+
+
+def _resolve_output_label(request_id: Any, batch_specs: list[PromptSpec]) -> str:
+    request_id_str = str(request_id)
+    if request_id_str.isdigit():
+        request_idx = int(request_id_str)
+        if 0 <= request_idx < len(batch_specs):
+            return batch_specs[request_idx].label
+    return f"req_{request_id_str}"
+
+
+def _count_voice_clone_prompts(prompt_specs: list[PromptSpec]) -> int:
+    return sum(1 for spec in prompt_specs if spec.ref_audio is not None)
+
+
 def parse_args():
     parser = FlexibleArgumentParser(
         description="Offline split-stage VoxCPM inference with vLLM Omni (auto sync/streaming by stage config)"
@@ -110,13 +229,25 @@ def parse_args():
         "--text",
         type=str,
         default="This is a split-stage VoxCPM synthesis example running on vLLM Omni.",
-        help="Text to synthesize.",
+        help="Text to synthesize. Ignored when --txt-prompts or --jsonl-prompts is used.",
+    )
+    parser.add_argument(
+        "--txt-prompts",
+        type=str,
+        default=None,
+        help="Path to a .txt file with one synthesis text per line.",
+    )
+    parser.add_argument(
+        "--jsonl-prompts",
+        type=str,
+        default=None,
+        help="Path to a .jsonl file. Each line must contain at least {'text': ...}; clone rows can also set ref_audio/ref_text.",
     )
     parser.add_argument(
         "--ref-audio",
         type=str,
         default=None,
-        help="Optional reference audio path for voice cloning.",
+        help="Optional reference audio path for voice cloning. With --txt-prompts, the same reference is applied to every line.",
     )
     parser.add_argument(
         "--ref-text",
@@ -183,16 +314,30 @@ def parse_args():
         default=1,
         help="Number of full inference runs (same prompt each time). Default 1.",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Number of requests submitted together. In streaming mode this is also the per-wave concurrency.",
+    )
     args = parser.parse_args()
 
     if not args.model:
         parser.error("--model is required unless $VOXCPM_MODEL is set")
+    if args.txt_prompts is not None and args.jsonl_prompts is not None:
+        parser.error("--txt-prompts and --jsonl-prompts are mutually exclusive")
     if (args.ref_audio is None) != (args.ref_text is None):
         parser.error("--ref-audio and --ref-text must be provided together")
     if args.num_runs < 1:
         parser.error("--num-runs must be >= 1")
+    if args.batch_size < 1:
+        parser.error("--batch-size must be >= 1")
     if args.output_dir is None:
         args.output_dir = "output_audio_streaming" if _is_streaming_stage_config(args.stage_configs_path) else "output_audio"
+    try:
+        args.prompt_specs = _load_prompt_specs(args)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     return args
 
@@ -208,20 +353,23 @@ def _is_streaming_stage_config(stage_configs_path: str) -> bool:
 async def _run_streaming_single(
     omni: AsyncOmni,
     args: Any,
+    spec: PromptSpec,
     output_dir: Path,
     request_id: str,
     *,
     run_index: int,
     num_runs: int,
+    prompt_index: int,
+    prompt_count: int,
 ) -> Path:
-    prompt = _build_prompt(args, global_request_id=request_id)
+    prompt = _build_prompt_for_spec(args, spec, global_request_id=request_id)
     delta_chunks: list[torch.Tensor] = []
     sample_rate = 24000
     chunk_i = 0
     prev_total_samples = 0
     t_start = time.perf_counter()
 
-    if run_index == 0:
+    if run_index == 0 and prompt_index == 0:
         print(f"---prompt---:{prompt}")
 
     async for stage_output in omni.generate(prompt, request_id=request_id):
@@ -246,9 +394,11 @@ async def _run_streaming_single(
                 prev_total_samples += int(delta.numel())
             delta_chunks.append(delta)
             logger.info(
-                "run=%d/%d chunk=%d delta_samples=%d buf_len=%d finished=%s",
+                "run=%d/%d prompt=%d/%d chunk=%d delta_samples=%d buf_len=%d finished=%s",
                 run_index + 1,
                 num_runs,
+                prompt_index + 1,
+                prompt_count,
                 chunk_i,
                 int(delta.numel()),
                 n,
@@ -263,11 +413,13 @@ async def _run_streaming_single(
         raise RuntimeError("No audio chunks received; check stage config and logs.")
 
     audio_cat = torch.cat([c.reshape(-1) for c in delta_chunks], dim=0)
-    # Include run_index so multi-run output names are always distinct from any engine ids.
-    output_path = output_dir / f"output_run{run_index + 1}_{request_id}.wav"
+    output_path = output_dir / f"output_run{run_index + 1}_{spec.label}.wav"
     sf.write(output_path, audio_cat.numpy(), sample_rate, format="WAV")
     elapsed = time.perf_counter() - t_start
-    print(f"Saved (streaming) run {run_index + 1}/{num_runs}: {output_path} ({elapsed:.2f}s)")
+    print(
+        f"Saved (streaming) run {run_index + 1}/{num_runs}, "
+        f"prompt {prompt_index + 1}/{prompt_count}: {output_path} ({elapsed:.2f}s)"
+    )
     return output_path
 
 
@@ -284,20 +436,32 @@ async def _run_streaming(args) -> list[Path]:
 
     t_total = time.perf_counter()
     paths: list[Path] = []
+    prompt_specs: list[PromptSpec] = args.prompt_specs
     for run in range(args.num_runs):
-        request_id = f"stream_{uuid.uuid4().hex[:8]}"
-        paths.append(
-            await _run_streaming_single(
-                omni,
-                args,
-                output_dir,
-                request_id,
-                run_index=run,
-                num_runs=args.num_runs,
-            )
-        )
+        for batch_start, batch_specs in _iter_batches(prompt_specs, args.batch_size):
+            tasks = []
+            for batch_offset, spec in enumerate(batch_specs):
+                prompt_index = batch_start + batch_offset
+                request_id = f"stream_{run + 1}_{spec.label}_{uuid.uuid4().hex[:8]}"
+                tasks.append(
+                    _run_streaming_single(
+                        omni,
+                        args,
+                        spec,
+                        output_dir,
+                        request_id,
+                        run_index=run,
+                        num_runs=args.num_runs,
+                        prompt_index=prompt_index,
+                        prompt_count=len(prompt_specs),
+                    )
+                )
+            paths.extend(await asyncio.gather(*tasks))
     total_elapsed = time.perf_counter() - t_total
-    print(f"All streaming runs finished: {args.num_runs} file(s) in {total_elapsed:.2f}s total")
+    print(
+        f"All streaming runs finished: {args.num_runs} run(s), "
+        f"{len(prompt_specs)} prompt(s), {len(paths)} file(s) in {total_elapsed:.2f}s total"
+    )
     return paths
 
 
@@ -313,41 +477,60 @@ def _run_sync(args) -> list[Path]:
 
     t_total = time.perf_counter()
     saved_paths: list[Path] = []
+    prompt_specs: list[PromptSpec] = args.prompt_specs
     for run in range(args.num_runs):
-        run_tag = f"sync_{uuid.uuid4().hex[:8]}"
-        prompt = _build_prompt(args, global_request_id=run_tag)
         t_run = time.perf_counter()
-        if run == 0:
-            print(f"---prompt---:{prompt}")
         run_paths: list[Path] = []
-        for stage_outputs in omni.generate([prompt]):
-            # Do not use output.request_id as the only filename stem: vLLM may reuse the same
-            # id across sequential generate() calls, which overwrites the WAV.
-            for j, mm in enumerate(_iter_request_multimodal_outputs(stage_outputs.request_output)):
-                save_stem = f"run{run + 1}_{run_tag}" if j == 0 else f"run{run + 1}_{run_tag}_{j}"
-                run_paths.append(_save_wav(mm, output_dir, save_stem))
-        if not run_paths:
-            raise RuntimeError("No output from Omni.generate")
+        for batch_index, (batch_start, batch_specs) in enumerate(_iter_batches(prompt_specs, args.batch_size), start=1):
+            prompts = []
+            for batch_offset, spec in enumerate(batch_specs):
+                prompt_index = batch_start + batch_offset
+                global_request_id = f"sync_run{run + 1}_{spec.label}_{prompt_index + 1:03d}"
+                prompts.append(_build_prompt_for_spec(args, spec, global_request_id=global_request_id))
+            if run == 0 and batch_index == 1 and prompts:
+                print(f"---prompt---:{prompts[0]}")
+
+            batch_paths: list[Path] = []
+            for stage_outputs in omni.generate(prompts):
+                request_output = stage_outputs.request_output
+                if request_output is None:
+                    continue
+                item_label = _resolve_output_label(request_output.request_id, batch_specs)
+                for j, mm in enumerate(_iter_request_multimodal_outputs(request_output)):
+                    save_stem = (
+                        f"run{run + 1}_batch{batch_index}_{item_label}"
+                        if j == 0
+                        else f"run{run + 1}_batch{batch_index}_{item_label}_{j}"
+                    )
+                    batch_paths.append(_save_wav(mm, output_dir, save_stem))
+            if not batch_paths:
+                raise RuntimeError("No output from Omni.generate")
+            run_paths.extend(batch_paths)
+            print(f"Saved (sync) run {run + 1}/{args.num_runs}, batch {batch_index}: {len(batch_paths)} file(s)")
+
         saved_paths.extend(run_paths)
-        print(
-            f"Saved (sync) run {run + 1}/{args.num_runs}: "
-            f"{len(run_paths)} file(s) ({time.perf_counter() - t_run:.2f}s)"
-        )
+        print(f"Run {run + 1}/{args.num_runs} finished: {len(run_paths)} file(s) ({time.perf_counter() - t_run:.2f}s)")
         for path in run_paths:
             print(f"  {path}")
 
     total_elapsed = time.perf_counter() - t_total
-    print(f"All sync runs finished: {args.num_runs} run(s), {len(saved_paths)} file(s) in {total_elapsed:.2f}s total")
+    print(
+        f"All sync runs finished: {args.num_runs} run(s), "
+        f"{len(prompt_specs)} prompt(s), {len(saved_paths)} file(s) in {total_elapsed:.2f}s total"
+    )
     return saved_paths
 
 
 def main(args) -> None:
     logging.basicConfig(level=logging.INFO)
     is_streaming = _is_streaming_stage_config(args.stage_configs_path)
+    voice_clone_count = _count_voice_clone_prompts(args.prompt_specs)
     print(f"Model: {args.model}")
     print(f"Stage config: {args.stage_configs_path}")
     print(f"Route: {'streaming' if is_streaming else 'sync'} (from stage-configs-path)")
-    print(f"Voice cloning: {'enabled' if args.ref_audio else 'disabled'}")
+    print(f"Prompt count: {len(args.prompt_specs)}")
+    print(f"Batch size: {args.batch_size}")
+    print(f"Voice cloning prompts: {voice_clone_count}/{len(args.prompt_specs)}")
     print(f"Num runs: {args.num_runs}")
     if is_streaming:
         asyncio.run(_run_streaming(args))
