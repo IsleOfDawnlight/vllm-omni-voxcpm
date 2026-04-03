@@ -5,144 +5,28 @@ import os
 import shutil
 import sys
 import tempfile
-<<<<<<< HEAD
-=======
 import warnings
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 import wave
 from contextlib import contextmanager
 from hashlib import sha256
 from pathlib import Path
-<<<<<<< HEAD
-from typing import Any, Iterable, Iterator
-=======
 from typing import Any, Generator, Iterable, List, Optional, Tuple, Type, Union
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 from unittest.mock import patch
 
 import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange
-<<<<<<< HEAD
-=======
 from tqdm import tqdm
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.sequence import IntermediateTensors
 
 from vllm_omni.model_executor.models.output_templates import OmniOutput
-<<<<<<< HEAD
-from vllm_omni.model_executor.stage_input_processors.voxcpm import DEFAULT_LATENT_CHUNK_PATCHES
-=======
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 
 logger = init_logger(__name__)
 
 
-<<<<<<< HEAD
-def _iter_exception_messages(exc: BaseException) -> Iterator[str]:
-    seen: set[int] = set()
-    cur: BaseException | None = exc
-    while cur is not None and id(cur) not in seen:
-        seen.add(id(cur))
-        msg = str(cur)
-        if msg:
-            yield msg
-        cur = cur.__cause__ or cur.__context__
-
-
-def _is_torchcodec_load_error(exc: BaseException) -> bool:
-    combined = "\n".join(_iter_exception_messages(exc)).lower()
-    indicators = (
-        "torchcodec",
-        "load_with_torchcodec",
-        "libtorchcodec",
-        "audiodecoder",
-    )
-    return any(indicator in combined for indicator in indicators)
-
-
-def _soundfile_torchaudio_load(
-    uri: str | os.PathLike[str],
-    *,
-    frame_offset: int = 0,
-    num_frames: int = -1,
-    normalize: bool = True,
-    channels_first: bool = True,
-    format: str | None = None,
-    buffer_size: int = 4096,
-    backend: str | None = None,
-) -> tuple[torch.Tensor, int]:
-    del normalize, format, buffer_size, backend
-    try:
-        import soundfile as sf
-    except ImportError as exc:
-        raise ImportError(
-            "soundfile is required to load VoxCPM prompt audio when torchaudio "
-            "falls back to torchcodec on this platform."
-        ) from exc
-
-    audio_np, sample_rate = sf.read(uri, dtype="float32", always_2d=True)
-    if frame_offset:
-        audio_np = audio_np[frame_offset:]
-    if num_frames not in (-1, None):
-        audio_np = audio_np[:num_frames]
-
-    audio = torch.from_numpy(np.array(audio_np, copy=True))
-    if channels_first:
-        audio = audio.transpose(0, 1).contiguous()
-    return audio, int(sample_rate)
-
-
-def _build_prompt_cache_with_audio_load_fallback(
-    tts_model: Any,
-    *,
-    prompt_text: str,
-    prompt_wav_path: str,
-) -> Any:
-    try:
-        return tts_model.build_prompt_cache(
-            prompt_text=prompt_text,
-            prompt_wav_path=prompt_wav_path,
-        )
-    except Exception as exc:
-        if not _is_torchcodec_load_error(exc):
-            raise
-        logger.warning(
-            "VoxCPM prompt audio load hit torchaudio/torchcodec failure; "
-            "retrying with soundfile fallback: %s",
-            exc,
-        )
-        try:
-            import voxcpm.model.voxcpm as native_voxcpm_module
-
-            torchaudio_module = native_voxcpm_module.torchaudio
-        except Exception:
-            import torchaudio as torchaudio_module
-
-        with patch.object(torchaudio_module, "load", new=_soundfile_torchaudio_load):
-            return tts_model.build_prompt_cache(
-                prompt_text=prompt_text,
-                prompt_wav_path=prompt_wav_path,
-            )
-
-
-def _import_voxcpm_model_class():
-    try:
-        from voxcpm.model.voxcpm import VoxCPMModel
-
-        return VoxCPMModel
-    except ImportError:
-        pass
-
-    candidates: list[Path] = []
-    env_path = os.environ.get("VLLM_OMNI_VOXCPM_CODE_PATH")
-    if env_path:
-        candidates.append(Path(env_path).expanduser())
-
-=======
 def _import_voxcpm_base_model_class():
     """Import upstream ``VoxCPMModel`` from ``VoxCPM/src/voxcpm`` (env, sibling tree, or pip)."""
     env_path = os.environ.get("VLLM_OMNI_VOXCPM_CODE_PATH")
@@ -160,7 +44,6 @@ def _import_voxcpm_base_model_class():
                 pass
 
     candidates: list[Path] = []
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
     repo_root = Path(__file__).resolve().parents[4]
     candidates.append(repo_root.parent / "VoxCPM" / "src")
 
@@ -177,11 +60,6 @@ def _import_voxcpm_base_model_class():
         except ImportError:
             continue
 
-<<<<<<< HEAD
-    raise ImportError(
-        "Failed to import VoxCPMModel. Install the `voxcpm` package or set "
-        "`VLLM_OMNI_VOXCPM_CODE_PATH` to the VoxCPM `src` directory."
-=======
     try:
         from voxcpm.model.voxcpm import VoxCPMModel
 
@@ -193,25 +71,10 @@ def _import_voxcpm_base_model_class():
         "Failed to import VoxCPMModel. Install the `voxcpm` package or set "
         "`VLLM_OMNI_VOXCPM_CODE_PATH` to the VoxCPM repository `src` directory "
         "(the parent of the `voxcpm` package that contains `model/` and `modules/`)."
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
     )
 
 
 def _import_voxcpm_audio_vae_classes():
-<<<<<<< HEAD
-    try:
-        from voxcpm.modules.audiovae import AudioVAE, AudioVAEConfig
-
-        return AudioVAE, AudioVAEConfig
-    except ImportError:
-        pass
-
-    candidates: list[Path] = []
-    env_path = os.environ.get("VLLM_OMNI_VOXCPM_CODE_PATH")
-    if env_path:
-        candidates.append(Path(env_path).expanduser())
-
-=======
     env_path = os.environ.get("VLLM_OMNI_VOXCPM_CODE_PATH")
     if env_path:
         env_candidate = Path(env_path).expanduser()
@@ -229,7 +92,6 @@ def _import_voxcpm_audio_vae_classes():
 
     # 环境变量无效 → 默认仓库路径
     candidates: list[Path] = []
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
     repo_root = Path(__file__).resolve().parents[4]
     candidates.append(repo_root.parent / "VoxCPM" / "src")
 
@@ -241,22 +103,10 @@ def _import_voxcpm_audio_vae_classes():
             sys.path.insert(0, candidate_str)
         try:
             from voxcpm.modules.audiovae import AudioVAE, AudioVAEConfig
-<<<<<<< HEAD
-
-=======
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
             return AudioVAE, AudioVAEConfig
         except ImportError:
             continue
 
-<<<<<<< HEAD
-    raise ImportError(
-        "Failed to import VoxCPM AudioVAE. Install the `voxcpm` package or set "
-        "`VLLM_OMNI_VOXCPM_CODE_PATH` to the VoxCPM `src` directory."
-    )
-
-
-=======
     # 最后尝试 pip 包
     try:
         from voxcpm.modules.audiovae import AudioVAE, AudioVAEConfig
@@ -512,7 +362,6 @@ def _import_voxcpm_model_class() -> Type[Any]:
     return _make_voxcpm_model_for_omni(base)
 
 
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 def _device_to_string(device: torch.device) -> str:
     if device.index is None:
         return device.type
@@ -603,107 +452,6 @@ def _force_cuda_available_for_npu(device: torch.device):
         yield
 
 
-<<<<<<< HEAD
-def _voxcpm_native_model_dtype(tts_model: Any) -> torch.dtype:
-    try:
-        from voxcpm.model.utils import get_dtype
-
-        return get_dtype(tts_model.config.dtype)
-    except Exception:
-        return torch.bfloat16
-
-
-def _voxcpm_iter_latent_patches_native(
-    tts_model: Any,
-    *,
-    target_text: str,
-    prompt_cache: dict[str, Any] | None,
-    min_len: int,
-    max_len: int,
-    inference_timesteps: int,
-    cfg_value: float,
-    retry_badcase_ratio_threshold: float,
-    streaming_prefix_len: int = 3,
-) -> Iterator[tuple[torch.Tensor, bool]]:
-    """Walk native ``VoxCPMModel._inference(..., streaming=True)`` one AR step at a time.
-
-    Each yield is a *new* latent patch ``(1, P, D)`` on CPU float32, plus ``has_more`` until
-    the final patch (``has_more=False``). The Omni forward batches up to
-    ``latent_chunk_patches`` yields per scheduler step so each SHM payload matches the legacy
-    time-chunk granularity instead of one patch per step.
-    """
-    target_text = " ".join(target_text.split())
-    if prompt_cache is None:
-        prompt_audio_feat = torch.empty(
-            (0, tts_model.patch_size, tts_model.audio_vae.latent_dim),
-            dtype=torch.float32,
-        )
-        text = target_text
-    else:
-        prompt_audio_feat = prompt_cache["audio_feat"]
-        prompt_text = prompt_cache["prompt_text"]
-        text = prompt_text + target_text
-
-    text_token = torch.LongTensor(tts_model.text_tokenizer(text))
-    text_token = torch.cat(
-        [
-            text_token,
-            torch.tensor(
-                [tts_model.audio_start_token],
-                dtype=torch.int32,
-                device=text_token.device,
-            ),
-        ],
-        dim=-1,
-    )
-
-    audio_length = prompt_audio_feat.size(0)
-    text_length = text_token.shape[0]
-    text_pad_token = torch.zeros(audio_length, dtype=torch.int32, device=text_token.device)
-    audio_pad_feat = torch.zeros(
-        (text_token.shape[0], tts_model.patch_size, tts_model.audio_vae.latent_dim),
-        dtype=torch.float32,
-        device=text_token.device,
-    )
-    text_token = torch.cat([text_token, text_pad_token])
-    audio_feat = torch.cat([audio_pad_feat, prompt_audio_feat], dim=0)
-    text_mask = torch.cat([torch.ones(text_length), torch.zeros(audio_length)]).type(torch.int32).to(text_token.device)
-    audio_mask = torch.cat([torch.zeros(text_length), torch.ones(audio_length)]).type(torch.int32).to(text_token.device)
-
-    text_token = text_token.unsqueeze(0).to(tts_model.device)
-    text_mask = text_mask.unsqueeze(0).to(tts_model.device)
-    audio_feat = audio_feat.unsqueeze(0).to(tts_model.device).to(_voxcpm_native_model_dtype(tts_model))
-    audio_mask = audio_mask.unsqueeze(0).to(tts_model.device)
-
-    target_text_length = len(tts_model.text_tokenizer(target_text))
-    max_inf = min(int(target_text_length * retry_badcase_ratio_threshold + 10), max_len)
-
-    inference_gen = tts_model._inference(
-        text_token,
-        text_mask,
-        audio_feat,
-        audio_mask,
-        min_len=min_len,
-        max_len=max_inf,
-        inference_timesteps=inference_timesteps,
-        cfg_value=cfg_value,
-        streaming=True,
-        streaming_prefix_len=streaming_prefix_len,
-    )
-
-    prev: torch.Tensor | None = None
-    for _feat_pred, pred_feat_seq in inference_gen:
-        last = pred_feat_seq[-1]
-        patch = last.squeeze(0).detach().float().cpu().contiguous()
-        if prev is not None:
-            yield prev, True
-        prev = patch
-    if prev is not None:
-        yield prev, False
-
-
-=======
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 class _DirectVoxCPMLatentGenerator:
     def __init__(self, tts_model: Any):
         self.tts_model = tts_model
@@ -732,21 +480,12 @@ class _DirectVoxCPMLatentGenerator:
 
         prompt_cache = None
         if prompt_wav_path is not None and prompt_text is not None:
-<<<<<<< HEAD
-            prompt_cache = _build_prompt_cache_with_audio_load_fallback(
-                self.tts_model,
-=======
             prompt_cache = self.tts_model.build_prompt_cache(
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
                 prompt_text=prompt_text,
                 prompt_wav_path=prompt_wav_path,
             )
 
-<<<<<<< HEAD
-        _, _, pred_audio_feat = self.tts_model.generate_with_prompt_cache(
-=======
         gen_kw = dict(
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
             target_text=" ".join(text.split()),
             prompt_cache=prompt_cache,
             min_len=min_len,
@@ -757,16 +496,6 @@ class _DirectVoxCPMLatentGenerator:
             retry_badcase_max_times=retry_badcase_max_times,
             retry_badcase_ratio_threshold=retry_badcase_ratio_threshold,
         )
-<<<<<<< HEAD
-        return pred_audio_feat.detach().cpu().to(torch.float32)
-
-
-class _DirectVoxCPMAudioVAE:
-    def __init__(self, audio_vae: nn.Module):
-        self.audio_vae = audio_vae
-        self.sample_rate = int(getattr(audio_vae, "sample_rate", 24000))
-        self.latent_dim = int(getattr(audio_vae, "latent_dim", 64))
-=======
         try:
             _, _, pred_audio_feat = self.tts_model.generate_with_prompt_cache(
                 **gen_kw,
@@ -846,7 +575,6 @@ class _DirectVoxCPMAudioVAE:
         self._chunk_size = int(getattr(audio_vae, "chunk_size", 1))
         # Matches VoxCPM ``_generate_with_prompt_cache`` streaming: decode_audio[..., -patch_len:]
         self._stream_audio_patch_samples = max(1, self.patch_size * self._chunk_size)
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 
     def _prepare_latents_for_decode(self, latent_audio_feat: Any) -> torch.Tensor:
         latents = latent_audio_feat
@@ -874,13 +602,6 @@ class _DirectVoxCPMAudioVAE:
         return latents
 
     @torch.no_grad()
-<<<<<<< HEAD
-    def decode(self, latent_audio_feat: Any) -> torch.Tensor:
-        latents = self._prepare_latents_for_decode(latent_audio_feat)
-        device = next(self.audio_vae.parameters()).device
-        audio = self.audio_vae.decode(latents.to(device=device, dtype=torch.float32))
-        return audio.squeeze(1).reshape(-1).detach().cpu().to(torch.float32)
-=======
     def decode(self, latent_audio_feat: Any, *, trim_streaming_patch: bool = False) -> torch.Tensor:
         latents = self._prepare_latents_for_decode(latent_audio_feat)
         device = next(self.audio_vae.parameters()).device
@@ -901,7 +622,6 @@ class _DirectVoxCPMAudioVAE:
             pl = self._stream_audio_patch_samples
             stream = stream[..., -pl:]
         return stream.reshape(-1).detach().cpu().to(torch.float32)
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 
 
 def _load_native_voxcpm_model(
@@ -957,12 +677,8 @@ def _load_native_voxcpm_audio_vae(
     audio_vae = audio_vae.to(device=device, dtype=torch.float32).eval()
     if device.type == "npu" and hasattr(torch, "npu"):
         torch.npu.set_device(device)
-<<<<<<< HEAD
-    return _DirectVoxCPMAudioVAE(audio_vae)
-=======
     patch_size = int(config_dict.get("patch_size", 2))
     return _DirectVoxCPMAudioVAE(audio_vae, patch_size=patch_size)
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 
 
 class VoxCPMForConditionalGeneration(nn.Module):
@@ -981,12 +697,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
         self.has_postprocess = False
         self.enable_update_additional_information = True
         self.requires_raw_input_tokens = True
-<<<<<<< HEAD
-        self._pipeline = None
-        # Latent chunk streaming: iterator keyed by ``omni_req_id``; each forward drains up to
-        # ``latent_chunk_patches`` native steps into one SHM chunk.
-        self._voxcpm_latent_patch_iters: dict[str, Iterator[tuple[torch.Tensor, bool]]] = {}
-=======
         self.inject_omni_request_id_into_runtime_info = True
         self._pipeline = None
         self._latent_stream_gens: dict[str, Any] = {}
@@ -1000,7 +710,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
         mc = getattr(self.vllm_config, "model_config", None)
         dtype = getattr(mc, "dtype", torch.float32) if mc is not None else torch.float32
         return device, dtype
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 
     def _ensure_model_loaded(self):
         if self._pipeline is not None:
@@ -1080,23 +789,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
 
         raise TypeError(f"Unsupported ref_audio format: {type(ref_audio)!r}")
 
-<<<<<<< HEAD
-    def _latent_chunk_patches_cfg(self) -> int:
-        """Patches per SHM chunk (connector ``extra.latent_chunk_patches``), default 8."""
-        mc = getattr(self.vllm_config, "model_config", None)
-        cc = getattr(mc, "stage_connector_config", None) if mc is not None else None
-        extra: Any
-        if isinstance(cc, dict):
-            extra = cc.get("extra", cc)
-        else:
-            extra = getattr(cc, "extra", None) if cc is not None else None
-        if isinstance(extra, dict) and extra.get("latent_chunk_patches") is not None:
-            return max(1, int(extra["latent_chunk_patches"]))
-        return DEFAULT_LATENT_CHUNK_PATCHES
-
-=======
     @staticmethod
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
     def _write_temp_prompt_wav(waveform: np.ndarray, sample_rate: int) -> str:
         prompt_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
         prompt_file.close()
@@ -1133,43 +826,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
         temp_prompt_wav = cls._write_temp_prompt_wav(waveform, sample_rate)
         return temp_prompt_wav, ref_text, temp_prompt_wav
 
-<<<<<<< HEAD
-    def _latent_ar_hidden_size(self) -> int:
-        """Hidden size placeholder for AR runner bookkeeping (latent stage only)."""
-        try:
-            return int(getattr(self.vllm_config.model_config.hf_text_config, "hidden_size", 1024))
-        except Exception:
-            return 1024
-
-    def embed_input_ids(self, input_ids: torch.Tensor, **_: Any) -> torch.Tensor:
-        hs = self._latent_ar_hidden_size()
-        if input_ids.numel() == 0:
-            return torch.empty((0, hs), device=input_ids.device, dtype=torch.float32)
-        # AR runner expects full hidden dim; values are placeholders (native VoxCPM runs in forward()).
-        return torch.zeros((input_ids.shape[0], hs), device=input_ids.device, dtype=torch.float32)
-
-    def compute_logits(
-        self, hidden_states: torch.Tensor | OmniOutput, sampling_metadata: Any = None
-    ) -> torch.Tensor | None:
-        """Latent stage under AR scheduler: return degenerate logits so sampler emits a fixed token.
-
-        Real outputs are carried via ``multimodal_outputs`` / pooling; logits only advance AR bookkeeping.
-        """
-        if self.model_stage not in self._LATENT_STAGES:
-            return None
-        if not isinstance(hidden_states, torch.Tensor):
-            return None
-        n = hidden_states.shape[0]
-        mc = self.vllm_config.model_config
-        if callable(getattr(mc, "get_vocab_size", None)):
-            vocab = int(mc.get_vocab_size())
-        else:
-            vocab = int(getattr(getattr(mc, "hf_text_config", mc), "vocab_size", 32000))
-        logits = torch.full((n, vocab), -1e9, device=hidden_states.device, dtype=torch.float32)
-        # Always pick token id 0 (must not be EOS for typical configs).
-        logits[:, 0] = 0.0
-        return logits.to(dtype=hidden_states.dtype)
-=======
     def embed_input_ids(self, input_ids: torch.Tensor, **_: Any) -> torch.Tensor:
         if input_ids.numel() == 0:
             return torch.empty((0, 1), device=input_ids.device, dtype=torch.float32)
@@ -1219,7 +875,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
                 logits[:, eos_id] = -1.0e9
                 logits[:, safe_id] = 1.0e6
         return logits
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
 
     @torch.no_grad()
     def forward(
@@ -1231,19 +886,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
         runtime_additional_information: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> OmniOutput:
-<<<<<<< HEAD
-        # AR runner indexes ``hidden_states[logits_indices]``; provide a dummy tensor matching batch tokens.
-        num_tokens = int(input_ids.numel()) if input_ids is not None else 1
-        del positions, intermediate_tensors, inputs_embeds, kwargs
-        self._ensure_model_loaded()
-
-        infos = runtime_additional_information or [{}]
-        sample_rate = int(getattr(self._pipeline, "sample_rate", 24000))
-        if self.model_stage in self._VAE_STAGES:
-            if all(self._extract_val(info, "latent_audio_feat", None) is None for info in infos):
-                return OmniOutput(
-                    text_hidden_states=None,
-=======
         del positions, intermediate_tensors, inputs_embeds, kwargs
         self._ensure_model_loaded()
         out_dev, out_dtype = self._runner_hidden_device_dtype()
@@ -1259,7 +901,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
                 self._ar_emit_stop_token = True
                 return OmniOutput(
                     text_hidden_states=torch.zeros((0, 1), device=out_dev, dtype=out_dtype),
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
                     multimodal_outputs={
                         "model_outputs": [torch.zeros((0,), dtype=torch.float32) for _ in infos],
                         "sr": [torch.tensor(sample_rate, dtype=torch.int32) for _ in infos],
@@ -1268,30 +909,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
         else:
             texts = [self._extract_val(info, "text", "") for info in infos]
             if all(not text for text in texts):
-<<<<<<< HEAD
-                hs = self._latent_ar_hidden_size()
-                dev = input_ids.device if input_ids is not None else torch.device("cpu")
-                return OmniOutput(
-                    text_hidden_states=torch.zeros((num_tokens, hs), device=dev, dtype=torch.float32),
-                    multimodal_outputs={
-                        "latent_audio_feat": [torch.zeros((0,), dtype=torch.float32) for _ in infos],
-                        "sr": [torch.tensor(sample_rate, dtype=torch.int32) for _ in infos],
-                    },
-                )
-
-        use_native_latent_stream = (
-            self.model_stage in self._LATENT_STAGES
-            and getattr(self.vllm_config.model_config, "async_chunk", False)
-        )
-
-        outputs: list[torch.Tensor] = []
-        sample_rates: list[torch.Tensor] = []
-        stream_continue: list[bool] = []
-        for info in infos:
-            if self.model_stage in self._VAE_STAGES:
-                latent_audio_feat = self._extract_val(info, "latent_audio_feat", None)
-                audio_tensor = self._pipeline.decode(latent_audio_feat)
-=======
                 mm_empty: dict[str, Any] = {
                     "latent_audio_feat": [torch.zeros((0,), dtype=torch.float32) for _ in infos],
                     "sr": [torch.tensor(sample_rate, dtype=torch.int32) for _ in infos],
@@ -1315,7 +932,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
                     latent_audio_feat,
                     trim_streaming_patch=async_chunk,
                 )
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
                 outputs.append(audio_tensor.float().cpu())
                 sample_rates.append(torch.tensor(sample_rate, dtype=torch.int32))
                 continue
@@ -1330,69 +946,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
             retry_badcase_ratio_threshold = float(self._extract_val(info, "retry_badcase_ratio_threshold", 6.0))
             streaming_prefix_len = int(self._extract_val(info, "streaming_prefix_len", 3))
 
-<<<<<<< HEAD
-            prompt_wav_path, prompt_text, temp_prompt_wav = self._resolve_prompt_inputs(info)
-            try:
-                if self.model_stage in self._LATENT_STAGES:
-                    if use_native_latent_stream:
-                        req_id = str(self._extract_val(info, "omni_req_id", "0"))
-                        tts = self._pipeline.tts_model
-                        if req_id not in self._voxcpm_latent_patch_iters:
-                            prompt_cache = None
-                            if prompt_wav_path is not None and prompt_text is not None:
-                                prompt_cache = _build_prompt_cache_with_audio_load_fallback(
-                                    tts,
-                                    prompt_text=prompt_text,
-                                    prompt_wav_path=prompt_wav_path,
-                                )
-                            self._voxcpm_latent_patch_iters[req_id] = _voxcpm_iter_latent_patches_native(
-                                tts,
-                                target_text=" ".join(text.split()),
-                                prompt_cache=prompt_cache,
-                                min_len=min_len,
-                                max_len=max_len,
-                                inference_timesteps=inference_timesteps,
-                                cfg_value=cfg_value,
-                                retry_badcase_ratio_threshold=retry_badcase_ratio_threshold,
-                                streaming_prefix_len=streaming_prefix_len,
-                            )
-                        it = self._voxcpm_latent_patch_iters[req_id]
-                        chunk_cap = self._latent_chunk_patches_cfg()
-                        patches: list[torch.Tensor] = []
-                        last_hm = False
-                        for _ in range(chunk_cap):
-                            try:
-                                patch_cpu, last_hm = next(it)
-                            except StopIteration:
-                                last_hm = False
-                                self._voxcpm_latent_patch_iters.pop(req_id, None)
-                                break
-                            patches.append(patch_cpu)
-                            if not last_hm:
-                                self._voxcpm_latent_patch_iters.pop(req_id, None)
-                                break
-                        if not patches:
-                            outputs.append(torch.zeros((0, 1, 1), dtype=torch.float32))
-                            stream_continue.append(False)
-                        else:
-                            stacked = torch.cat(patches, dim=0)
-                            outputs.append(stacked)
-                            stream_continue.append(last_hm)
-                    else:
-                        latent_audio_feat = self._pipeline.generate_latents(
-                            text=text,
-                            prompt_wav_path=prompt_wav_path,
-                            prompt_text=prompt_text,
-                            cfg_value=cfg_value,
-                            inference_timesteps=inference_timesteps,
-                            min_len=min_len,
-                            max_len=max_len,
-                            retry_badcase=retry_badcase,
-                            retry_badcase_max_times=retry_badcase_max_times,
-                            retry_badcase_ratio_threshold=retry_badcase_ratio_threshold,
-                        )
-                        outputs.append(latent_audio_feat.float().cpu())
-=======
             req_key = str(info.get("_omni_req_id", "0"))
             prompt_wav_path: str | None = None
             prompt_text: str | None = None
@@ -1460,7 +1013,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
                     outputs.append(latent_audio_feat.float().cpu())
                     outputs_tensor = torch.stack(outputs)
                     print(f"---outputs_tensor---:{outputs_tensor.shape},latent_audio_feat:{latent_audio_feat.shape}")
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
             finally:
                 if temp_prompt_wav is not None and os.path.exists(temp_prompt_wav):
                     os.unlink(temp_prompt_wav)
@@ -1469,22 +1021,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
 
         output_key = "latent_audio_feat" if self.model_stage in self._LATENT_STAGES else "model_outputs"
         mm: dict[str, Any] = {output_key: outputs, "sr": sample_rates}
-<<<<<<< HEAD
-        # 0/1 float tensor per request: msgspec IPC rejects raw bool in pooling_output.
-        if use_native_latent_stream and stream_continue:
-            mm["voxcpm_streaming_continue"] = [
-                torch.tensor(1.0 if c else 0.0, dtype=torch.float32) for c in stream_continue
-            ]
-        dev = input_ids.device if input_ids is not None else torch.device("cpu")
-        hs = self._latent_ar_hidden_size()
-        text_hs = (
-            torch.zeros((num_tokens, hs), device=dev, dtype=torch.float32)
-            if self.model_stage in self._LATENT_STAGES
-            else None
-        )
-        return OmniOutput(
-            text_hidden_states=text_hs,
-=======
         if outputs:
             outputs_tensor = torch.stack(outputs)
             if outputs_tensor.ndim == 1:
@@ -1507,7 +1043,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
 
         return OmniOutput(
             text_hidden_states=text_hidden_states,
->>>>>>> b91655143ab1a16b3105ed625c11ed7177464a4d
             multimodal_outputs=mm,
         )
 
