@@ -9,6 +9,8 @@ It covers:
 - non-streaming with `vllm_omni/model_executor/stage_configs/voxcpm_no_async_chunk.yaml`
 - text-only synthesis
 - voice cloning with `ref_audio` + `ref_text`
+- text-to-speech batch inputs from `--txt-prompts`
+- voice cloning batch inputs from `--txt-prompts` or `--jsonl-prompts`
 
 ## Prerequisites
 
@@ -58,6 +60,40 @@ python examples/offline_inference/voxcpm/end2end.py \
   --ref-text "Transcript of the reference audio."
 ```
 
+Text batch (`--txt-prompts`, one text per line):
+
+```bash
+python examples/offline_inference/voxcpm/end2end.py \
+  --model "$VOXCPM_MODEL" \
+  --txt-prompts /path/to/prompts.txt \
+  --batch-size 4
+```
+
+Voice cloning batch with one shared reference (`--txt-prompts` + `--ref-audio` + `--ref-text`):
+
+```bash
+python examples/offline_inference/voxcpm/end2end.py \
+  --model "$VOXCPM_MODEL" \
+  --txt-prompts /path/to/prompts.txt \
+  --ref-audio /path/to/reference.wav \
+  --ref-text "Transcript of the reference audio." \
+  --batch-size 4
+```
+
+Voice cloning batch with per-item references (`--jsonl-prompts`):
+
+```bash
+cat >/tmp/voxcpm_clone_batch.jsonl <<'EOF'
+{"text": "This is the first cloned sentence.", "ref_audio": "/path/to/ref_a.wav", "ref_text": "Transcript for reference A."}
+{"text": "This is the second cloned sentence.", "ref_audio": "/path/to/ref_b.wav", "ref_text": "Transcript for reference B."}
+EOF
+
+python examples/offline_inference/voxcpm/end2end.py \
+  --model "$VOXCPM_MODEL" \
+  --jsonl-prompts /tmp/voxcpm_clone_batch.jsonl \
+  --batch-size 2
+```
+
 Streaming:
 
 ```bash
@@ -70,13 +106,46 @@ python examples/offline_inference/voxcpm/end2end.py \
 Generated audio is saved to `output_audio/` by default for non-streaming, and to
 `output_audio_streaming/` by default for streaming.
 
+The same batch flags also work with the streaming stage config. In streaming mode,
+`--batch-size` controls how many requests are launched concurrently in each wave.
+
+## Batch Input Formats
+
+`--txt-prompts` expects one synthesis text per non-empty line:
+
+```text
+This is the first sentence.
+This is the second sentence.
+This is the third sentence.
+```
+
+`--jsonl-prompts` expects one JSON object per line. Each line must contain `text`.
+For voice cloning rows, provide `ref_audio` and `ref_text` together:
+
+```json
+{"text": "Text-only row"}
+{"text": "Clone row", "ref_audio": "/path/to/ref.wav", "ref_text": "Reference transcript."}
+```
+
 ## Useful Arguments
 
 - `--stage-configs-path`: override the split-stage config path explicitly
+- `--txt-prompts`: load one synthesis text per line from a `.txt` file
+- `--jsonl-prompts`: load prompts from `.jsonl`, including per-item voice cloning metadata
+- `--batch-size`: requests submitted together per sync batch, or concurrent requests per streaming wave
 - `--cfg-value`: guidance value passed to VoxCPM
 - `--inference-timesteps`: number of diffusion timesteps
 - `--min-len`: minimum token length
 - `--max-new-tokens`: maximum token length
+
+## Batching Notes
+
+The script accepts prompt batches in both sync and streaming modes, but the
+default VoxCPM stage configs still use `runtime.max_batch_size: 1`. That means:
+
+- `--txt-prompts` and `--jsonl-prompts` already let you run many requests in one command.
+- `--batch-size` controls prompt grouping in the script.
+- To get true engine-level batching inside the stage runtime, also raise the batch-related limits in the stage config.
 
 ## Omni async_chunk vs Qwen3-TTS (same transport, different Stage0 payloads)
 
@@ -100,4 +169,4 @@ Both pipelines use `async_chunk: true`, [`OmniChunkTransferAdapter`](../../../vl
 - Both streaming and non-streaming offline inference are kept.
 - It does not include the single-stage `voxcpm_full.yaml` path.
 - It does not include the OpenAI-compatible online speech serving adaptation.
-- Voice cloning requires both `--ref-audio` and `--ref-text`.
+- Voice cloning always requires `ref_audio` and `ref_text` together, whether passed globally or inside JSONL rows.
