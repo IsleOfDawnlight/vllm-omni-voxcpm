@@ -3,9 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 
 def is_native_voxcpm_config_dict(config_dict: Mapping[str, Any]) -> bool:
@@ -87,7 +86,7 @@ def ensure_hf_compatible_voxcpm_config(model: str | Path) -> str | None:
         return None
 
     rendered = _build_hf_compatible_voxcpm_config(config_dict)
-    digest = hashlib.sha256(f"{model_path}:{config_text}".encode()).hexdigest()[:16]
+    digest = hashlib.sha256(f"{model_path}:{config_text}".encode("utf-8")).hexdigest()[:16]
     out_dir = Path(tempfile.gettempdir()) / "vllm_omni_voxcpm_configs" / digest
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "config.json"

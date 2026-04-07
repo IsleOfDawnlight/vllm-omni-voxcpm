@@ -198,8 +198,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
                 # Empty chunk with more data expected: keep polling.
                 if not new_ids and not _fin_ok:
-                    if "latent_audio_feat" not in payload_data:
-                        return True
+                    return True
 
             # Mark as finished for consumption
             self._finished_load_reqs.add(req_id)
@@ -272,23 +271,9 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         if success:
             self.put_req_chunk[external_req_id] += 1
             logger.debug(f"[Stage-{stage_id}] Sent {connector_put_key}")
-            finished_flag = payload_data.get("finished")
-            is_payload_finished = False
-            if isinstance(finished_flag, torch.Tensor):
-                is_payload_finished = finished_flag.numel() == 1 and bool(finished_flag.item())
-            elif finished_flag is not None:
-                is_payload_finished = bool(finished_flag)
-
-            # Reclaim per-request async state only after the terminal payload
-            # has been sent successfully. This avoids cleanup->save races.
-            if is_payload_finished:
-                self.cleanup(request.request_id, external_req_id)
 
         if is_finished:
-            self.code_prompt_token_ids.pop(external_req_id, None)
-            cached_ic = getattr(self, "_cached_ic", None)
-            if cached_ic is not None:
-                cached_ic.pop(external_req_id, None)
+            self.cleanup_sender(external_req_id)
 
     ########################################################################
     # Cleanup
