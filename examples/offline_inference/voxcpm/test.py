@@ -344,13 +344,11 @@ def _print_request_summaries(request_summaries: list[dict[str, Any]]) -> None:
     print("每个 request 的 stage 耗时:")
     for item in request_summaries:
         stage_parts = [
-            f"{stage_name}={stage_ms:.2f}ms"
-            for stage_name, stage_ms in sorted(item["stage_wall_time_ms"].items())
+            f"{stage_name}={stage_ms:.2f}ms" for stage_name, stage_ms in sorted(item["stage_wall_time_ms"].items())
         ]
         stage_text = ", ".join(stage_parts) if stage_parts else "无 stage 数据"
         print(
-            f"- {item['request_id']}: {stage_text}, "
-            f"e2e={item['e2e_total_ms']:.2f}ms, tokens={item['e2e_total_tokens']}"
+            f"- {item['request_id']}: {stage_text}, e2e={item['e2e_total_ms']:.2f}ms, tokens={item['e2e_total_tokens']}"
         )
 
 
@@ -490,14 +488,10 @@ def main() -> int:
         print(f"- [{result.mode}] {result.case}: {status} ({result.elapsed_s:.2f}s)")
         for item in result.request_summaries:
             stage_parts = [
-                f"{stage_name}={stage_ms:.2f}ms"
-                for stage_name, stage_ms in sorted(item["stage_wall_time_ms"].items())
+                f"{stage_name}={stage_ms:.2f}ms" for stage_name, stage_ms in sorted(item["stage_wall_time_ms"].items())
             ]
             stage_text = ", ".join(stage_parts) if stage_parts else "无 stage 数据"
-            print(
-                f"  request={item['request_id']}, {stage_text}, "
-                f"e2e={item['e2e_total_ms']:.2f}ms"
-            )
+            print(f"  request={item['request_id']}, {stage_text}, e2e={item['e2e_total_ms']:.2f}ms")
 
     print(f"通过: {passed}/{len(results)}")
     results_json_path = output_root / "results.json"
