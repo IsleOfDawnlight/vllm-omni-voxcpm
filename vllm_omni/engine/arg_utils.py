@@ -11,11 +11,6 @@ from vllm.logger import init_logger
 
 from vllm_omni.config import OmniModelConfig
 from vllm_omni.engine.output_modality import OutputModality
-from vllm_omni.model_executor.models.voxcpm.configuration_voxcpm import VoxCPMConfig
-from vllm_omni.model_executor.models.voxcpm.native_config import (
-    detect_native_voxcpm_model_type,
-    ensure_hf_compatible_voxcpm_config,
-)
 from vllm_omni.plugins import load_omni_general_plugins
 
 logger = init_logger(__name__)
@@ -42,6 +37,7 @@ def _register_omni_hf_configs() -> None:
         from vllm_omni.model_executor.models.qwen3_tts.configuration_qwen3_tts import (
             Qwen3TTSConfig,
         )
+        from vllm_omni.model_executor.models.voxcpm.configuration_voxcpm import VoxCPMConfig
         from vllm_omni.model_executor.models.voxtral_tts.configuration_voxtral_tts import (
             VoxtralTTSConfig,
         )
@@ -76,6 +72,11 @@ def _register_omni_hf_configs() -> None:
 def _maybe_prepare_model_hf_config_path(model: str, hf_config_path: str | None) -> str | None:
     if hf_config_path:
         return hf_config_path
+
+    from vllm_omni.model_executor.models.voxcpm.native_config import (
+        detect_native_voxcpm_model_type,
+        ensure_hf_compatible_voxcpm_config,
+    )
 
     if detect_native_voxcpm_model_type(model) == "voxcpm":
         return ensure_hf_compatible_voxcpm_config(model)

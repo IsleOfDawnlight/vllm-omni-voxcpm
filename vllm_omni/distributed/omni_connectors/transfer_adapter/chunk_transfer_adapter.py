@@ -14,6 +14,7 @@ from ..utils.logging import get_connector_logger
 from .base import OmniTransferAdapterBase
 
 logger = get_connector_logger(__name__)
+_MAX_SINGLE_ELEMENT_UNWRAP_DEPTH = 8
 
 
 def _connector_finished_truthy(val: Any) -> bool:
@@ -35,8 +36,10 @@ def _connector_finished_truthy(val: Any) -> bool:
             return bool(np.asarray(val).item())
     except ImportError:
         pass
-    if isinstance(val, (list, tuple)) and len(val) == 1:
-        return _connector_finished_truthy(val[0])
+    unwrap_depth = 0
+    while isinstance(val, (list, tuple)) and len(val) == 1 and unwrap_depth < _MAX_SINGLE_ELEMENT_UNWRAP_DEPTH:
+        val = val[0]
+        unwrap_depth += 1
     return bool(val)
 
 

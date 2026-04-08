@@ -339,14 +339,14 @@ def _normalize_request_summaries(summary_blocks: list[dict[str, Any]]) -> list[d
 
 def _print_request_summaries(request_summaries: list[dict[str, Any]]) -> None:
     if not request_summaries:
-        print("未解析到 stage 耗时摘要。")
+        print("No stage timing summary was parsed.")
         return
-    print("每个 request 的 stage 耗时:")
+    print("Per-request stage timings:")
     for item in request_summaries:
         stage_parts = [
             f"{stage_name}={stage_ms:.2f}ms" for stage_name, stage_ms in sorted(item["stage_wall_time_ms"].items())
         ]
-        stage_text = ", ".join(stage_parts) if stage_parts else "无 stage 数据"
+        stage_text = ", ".join(stage_parts) if stage_parts else "no stage data"
         print(
             f"- {item['request_id']}: {stage_text}, e2e={item['e2e_total_ms']:.2f}ms, tokens={item['e2e_total_tokens']}"
         )
@@ -407,7 +407,7 @@ def _run_case(
     print()
     print("=" * 80)
     print(f"[{mode.name}] {case.name}")
-    print(f"输出目录: {case_output_dir}")
+    print(f"Output directory: {case_output_dir}")
     print(shlex.join(cmd))
 
     start = time.perf_counter()
@@ -482,7 +482,7 @@ def main() -> int:
 
     print()
     print("=" * 80)
-    print("汇总:")
+    print("Summary:")
     for result in results:
         status = "PASS" if result.ok else f"FAIL({result.returncode})"
         print(f"- [{result.mode}] {result.case}: {status} ({result.elapsed_s:.2f}s)")
@@ -490,10 +490,10 @@ def main() -> int:
             stage_parts = [
                 f"{stage_name}={stage_ms:.2f}ms" for stage_name, stage_ms in sorted(item["stage_wall_time_ms"].items())
             ]
-            stage_text = ", ".join(stage_parts) if stage_parts else "无 stage 数据"
+            stage_text = ", ".join(stage_parts) if stage_parts else "no stage data"
             print(f"  request={item['request_id']}, {stage_text}, e2e={item['e2e_total_ms']:.2f}ms")
 
-    print(f"通过: {passed}/{len(results)}")
+    print(f"Passed: {passed}/{len(results)}")
     results_json_path = output_root / "results.json"
     results_json_path.write_text(
         json.dumps(
@@ -514,11 +514,11 @@ def main() -> int:
         ),
         encoding="utf-8",
     )
-    print(f"结果汇总已写入: {results_json_path}")
+    print(f"Wrote results summary to: {results_json_path}")
     if failed:
-        print("失败用例:")
+        print("Failed cases:")
         for result in failed:
-            print(f"- [{result.mode}] {result.case}: 输出目录 {result.output_dir}, 日志 {result.log_path}")
+            print(f"- [{result.mode}] {result.case}: output dir {result.output_dir}, log {result.log_path}")
         return 1
     return 0
 

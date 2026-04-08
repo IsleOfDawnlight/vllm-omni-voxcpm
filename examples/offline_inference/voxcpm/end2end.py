@@ -23,9 +23,6 @@ from typing import Any
 
 import soundfile as sf
 import torch
-
-os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 
 from vllm_omni import AsyncOmni, Omni
@@ -759,4 +756,5 @@ def main(args) -> None:
 
 
 if __name__ == "__main__":
+    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     main(parse_args())

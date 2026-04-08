@@ -28,7 +28,7 @@ def detect_native_voxcpm_model_type(model: str | Path) -> str | None:
 
     try:
         config_dict = json.loads(config_path.read_text())
-    except Exception:
+    except (json.JSONDecodeError, OSError):
         return None
 
     if is_native_voxcpm_config_dict(config_dict):
@@ -80,7 +80,7 @@ def ensure_hf_compatible_voxcpm_config(model: str | Path) -> str | None:
     try:
         config_text = config_path.read_text()
         config_dict = json.loads(config_text)
-    except Exception:
+    except (json.JSONDecodeError, OSError):
         return None
 
     if not is_native_voxcpm_config_dict(config_dict):
