@@ -20,6 +20,7 @@ logger = init_logger(__name__)
 _ARCH_TO_MODEL_TYPE: dict[str, str] = {
     "CosyVoice3Model": "cosyvoice3",
     "OmniVoiceModel": "omnivoice",
+    "VoxCPMForConditionalGeneration": "voxcpm",
 }
 
 # Maps model architecture names to tokenizer subfolder paths within HF repos.
@@ -37,10 +38,10 @@ def _register_omni_hf_configs() -> None:
         from vllm_omni.model_executor.models.qwen3_tts.configuration_qwen3_tts import (
             Qwen3TTSConfig,
         )
-        from vllm_omni.model_executor.models.voxcpm.configuration_voxcpm import VoxCPMConfig
         from vllm_omni.model_executor.models.voxtral_tts.configuration_voxtral_tts import (
             VoxtralTTSConfig,
         )
+        from vllm_omni.transformers_utils.configs.voxcpm import VoxCPMConfig
     except Exception as exc:  # pragma: no cover - best-effort optional registration
         logger.warning("Skipping omni HF config registration due to import error: %s", exc)
         return
@@ -67,21 +68,6 @@ def _register_omni_hf_configs() -> None:
             pass
         if _CONFIG_REGISTRY is not None and model_type not in _CONFIG_REGISTRY:
             _CONFIG_REGISTRY[model_type] = config_cls
-
-
-def _maybe_prepare_model_hf_config_path(model: str, hf_config_path: str | None) -> str | None:
-    if hf_config_path:
-        return hf_config_path
-
-    from vllm_omni.model_executor.models.voxcpm.native_config import (
-        detect_native_voxcpm_model_type,
-        ensure_hf_compatible_voxcpm_config,
-    )
-
-    if detect_native_voxcpm_model_type(model) == "voxcpm":
-        return ensure_hf_compatible_voxcpm_config(model)
-
-    return hf_config_path
 
 
 def register_omni_models_to_vllm():
@@ -184,7 +170,6 @@ class OmniEngineArgs(EngineArgs):
             OmniModelConfig instance with all configuration fields set
         """
         self._ensure_omni_models_registered()
-        self.hf_config_path = _maybe_prepare_model_hf_config_path(self.model, self.hf_config_path)
 
         stage_connector_config = {
             "name": self.stage_connector_spec.get("name", "SharedMemoryConnector"),
