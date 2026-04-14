@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import warnings
 import wave
 from collections.abc import Callable, Generator, Iterable
@@ -387,7 +388,11 @@ class VoxCPMForConditionalGeneration(nn.Module):
         self._pipeline = None
         self._latent_stream_gens: dict[str, Any] = {}
         self._latent_stream_terminal_pending: dict[str, int] = {}
+        self._latent_stream_completed: set[str] = set()
         self._next_local_stream_key = 0
+        self._profile_async_chunks = os.getenv("VOXCPM_PROFILE_CHUNK", "") == "1"
+        self._latent_chunk_profile_counts: dict[str, int] = {}
+        self._vae_chunk_profile_count = 0
         self._ar_emit_stop_token = True
 
     def _runner_hidden_device_dtype(self) -> tuple[torch.device, torch.dtype]:
@@ -435,15 +440,19 @@ class VoxCPMForConditionalGeneration(nn.Module):
         return value
 
     def _resolve_stream_request_key(self, info: dict[str, Any]) -> str:
-        request_key = info.get("_omni_req_id")
+        request_key = info.get("__voxcpm_stream_key")
         if request_key is not None:
             return str(request_key)
 
-        request_key = info.get("__voxcpm_stream_key")
-        if request_key is None:
-            request_key = f"voxcpm-local-{self._next_local_stream_key}"
-            self._next_local_stream_key += 1
+        request_key = info.get("_omni_req_id")
+        if request_key is not None:
+            request_key = str(request_key)
             info["__voxcpm_stream_key"] = request_key
+            return request_key
+
+        request_key = f"voxcpm-local-{self._next_local_stream_key}"
+        self._next_local_stream_key += 1
+        info["__voxcpm_stream_key"] = request_key
         return str(request_key)
 
     def _recover_latent_from_input_ids(self, input_ids: torch.Tensor | None) -> torch.Tensor | None:
@@ -641,7 +650,18 @@ class VoxCPMForConditionalGeneration(nn.Module):
         sample_rates: list[torch.Tensor] = []
         for info in infos:
             latent_audio_feat = self._extract_val(info, "latent_audio_feat", None)
+            decode_start = time.perf_counter()
             audio_tensor = self._pipeline.decode(latent_audio_feat, trim_streaming_patch=async_chunk)
+            decode_elapsed_ms = (time.perf_counter() - decode_start) * 1000.0
+            if self._profile_async_chunks and async_chunk:
+                self._vae_chunk_profile_count += 1
+                logger.warning(
+                    "[VoxCPM][chunk-prof] stage=vae idx=%d latent_shape=%s audio_samples=%d decode_ms=%.3f",
+                    self._vae_chunk_profile_count,
+                    tuple(latent_audio_feat.shape) if isinstance(latent_audio_feat, torch.Tensor) else None,
+                    int(audio_tensor.numel()) if isinstance(audio_tensor, torch.Tensor) else -1,
+                    decode_elapsed_ms,
+                )
             outputs.append(audio_tensor.float().cpu())
             sample_rates.append(torch.tensor(sample_rate, dtype=torch.int32))
 
@@ -680,6 +700,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
         outputs: list[torch.Tensor] = []
         sample_rates: list[torch.Tensor] = []
         last_chunk_flags: list[bool] | None = [] if async_chunk else None
+        payload_finished_flags: list[bool] | None = [] if async_chunk else None
         for info in infos:
             text = self._extract_val(info, "text", "")
             cfg_value = float(self._extract_val(info, "cfg_value", 2.0))
@@ -700,10 +721,21 @@ class VoxCPMForConditionalGeneration(nn.Module):
                     outputs.append(torch.zeros((0,), dtype=torch.float32))
                     assert last_chunk_flags is not None
                     last_chunk_flags.append(True)
+                    assert payload_finished_flags is not None
+                    payload_finished_flags.append(terminal_pending == 1)
                     if terminal_pending == 1:
                         self._latent_stream_terminal_pending.pop(request_key, None)
                     else:
                         self._latent_stream_terminal_pending[request_key] = terminal_pending - 1
+                    sample_rates.append(torch.tensor(sample_rate, dtype=torch.int32))
+                    continue
+
+                if request_key in self._latent_stream_completed:
+                    outputs.append(torch.zeros((0,), dtype=torch.float32))
+                    assert last_chunk_flags is not None
+                    last_chunk_flags.append(True)
+                    assert payload_finished_flags is not None
+                    payload_finished_flags.append(False)
                     sample_rates.append(torch.tensor(sample_rate, dtype=torch.int32))
                     continue
 
@@ -722,23 +754,43 @@ class VoxCPMForConditionalGeneration(nn.Module):
                         retry_badcase=False,
                         retry_badcase_max_times=retry_badcase_max_times,
                         retry_badcase_ratio_threshold=retry_badcase_ratio_threshold,
+                        profile_tag=request_key,
                     )
                 generator = self._latent_stream_gens[request_key]
                 try:
+                    next_start = time.perf_counter()
                     chunk_latent, is_last = next(generator)
+                    next_elapsed_ms = (time.perf_counter() - next_start) * 1000.0
                 except StopIteration:
                     self._latent_stream_gens.pop(request_key, None)
                     self._latent_stream_terminal_pending[request_key] = 1
+                    self._latent_stream_completed.add(request_key)
                     outputs.append(torch.zeros((0,), dtype=torch.float32))
                     assert last_chunk_flags is not None
                     last_chunk_flags.append(True)
+                    assert payload_finished_flags is not None
+                    payload_finished_flags.append(True)
                 else:
                     if is_last:
                         self._latent_stream_gens.pop(request_key, None)
                         self._latent_stream_terminal_pending[request_key] = 1
+                        self._latent_stream_completed.add(request_key)
+                    if self._profile_async_chunks:
+                        chunk_idx = self._latent_chunk_profile_counts.get(request_key, 0)
+                        self._latent_chunk_profile_counts[request_key] = chunk_idx + 1
+                        logger.warning(
+                            "[VoxCPM][chunk-prof] stage=latent req=%s idx=%d chunk_shape=%s is_last=%s next_ms=%.3f",
+                            request_key,
+                            chunk_idx,
+                            tuple(chunk_latent.shape) if isinstance(chunk_latent, torch.Tensor) else None,
+                            bool(is_last),
+                            next_elapsed_ms,
+                        )
                     outputs.append(chunk_latent.detach().float().cpu())
                     assert last_chunk_flags is not None
                     last_chunk_flags.append(bool(is_last))
+                    assert payload_finished_flags is not None
+                    payload_finished_flags.append(False)
                 finally:
                     if created_temp is not None and os.path.exists(created_temp):
                         os.unlink(created_temp)
@@ -767,7 +819,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
             sample_rates.append(torch.tensor(sample_rate, dtype=torch.int32))
 
         self._ar_emit_stop_token = all(last_chunk_flags) if async_chunk and last_chunk_flags else True
-        return self._finalize_stage_output(
+        output = self._finalize_stage_output(
             output_key="latent_audio_feat",
             outputs=outputs,
             sample_rates=sample_rates,
@@ -775,6 +827,11 @@ class VoxCPMForConditionalGeneration(nn.Module):
             out_dtype=out_dtype,
             hidden_rows=hidden_rows,
         )
+        if async_chunk and payload_finished_flags is not None:
+            output.multimodal_outputs["finished"] = [
+                torch.tensor(flag, dtype=torch.bool) for flag in payload_finished_flags
+            ]
+        return output
 
     def compute_logits(self, hidden_states: torch.Tensor | OmniOutput, sampling_metadata: Any = None) -> torch.Tensor:
         del sampling_metadata
@@ -810,6 +867,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
         intermediate_tensors: Any = None,
         inputs_embeds: torch.Tensor | None = None,
         runtime_additional_information: list[dict[str, Any]] | None = None,
+        model_intermediate_buffer: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> OmniOutput:
         del positions, intermediate_tensors, inputs_embeds, kwargs
@@ -818,7 +876,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
         if input_ids is not None and input_ids.device.type == out_device.type:
             out_device = input_ids.device
 
-        infos = runtime_additional_information or [{}]
+        infos = model_intermediate_buffer or runtime_additional_information or [{}]
         hidden_rows = len(infos)
         if input_ids is not None and len(input_ids.shape) > 0:
             hidden_rows = max(hidden_rows, int(input_ids.shape[0]))
