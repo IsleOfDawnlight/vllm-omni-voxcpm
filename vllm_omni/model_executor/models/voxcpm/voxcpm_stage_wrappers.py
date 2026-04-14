@@ -138,7 +138,9 @@ class _DirectVoxCPMLatentGenerator:
         bootstrap_ms = (time.perf_counter() - bootstrap_start) * 1000.0
         if self._profile_stream_inner:
             logger.warning(
-                "[VoxCPM][stream-inner] tag=%s source=%s text_len=%d prompt_cache=%s prompt_cache_ms=%.3f create_ms=%.3f bootstrap_ms=%.3f first_none=%s",
+                "[VoxCPM][stream-inner] tag=%s source=%s text_len=%d "
+                "prompt_cache=%s prompt_cache_ms=%.3f create_ms=%.3f "
+                "bootstrap_ms=%.3f first_none=%s",
                 profile_tag or "-",
                 stream_source,
                 len(text),

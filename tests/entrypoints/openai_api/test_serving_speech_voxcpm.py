@@ -38,7 +38,7 @@ def voxcpm_server(mocker: MockerFixture):
         SimpleNamespace(
             engine_args=SimpleNamespace(model_stage="vae"),
             tts_args={},
-        )
+        ),
     ]
 
     mock_models = mocker.MagicMock()
