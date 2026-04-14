@@ -29,7 +29,14 @@ def voxcpm_server(mocker: MockerFixture):
     mock_engine_client.generate = mocker.MagicMock(return_value="generator")
     mock_engine_client.stage_configs = [
         SimpleNamespace(
-            engine_args=SimpleNamespace(model_stage="latent_generator"),
+            engine_args=SimpleNamespace(
+                model_stage="latent_generator",
+                model_arch="VoxCPMForConditionalGeneration",
+            ),
+            tts_args={},
+        ),
+        SimpleNamespace(
+            engine_args=SimpleNamespace(model_stage="vae"),
             tts_args={},
         )
     ]

@@ -7,6 +7,7 @@ explicitly patch values that differ from vLLM.
 import argparse
 import inspect
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
