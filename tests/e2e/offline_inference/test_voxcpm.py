@@ -8,9 +8,9 @@ from typing import Any
 
 import numpy as np
 import pytest
-import tests.conftest as omni_test_conftest
 import torch
 
+import tests.conftest as omni_test_conftest
 from tests.conftest import OmniRunner
 from tests.utils import hardware_test
 
