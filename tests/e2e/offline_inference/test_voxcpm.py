@@ -5,7 +5,6 @@
 
 import json
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +15,10 @@ import torch
 import tests.conftest as omni_test_conftest
 from tests.conftest import OmniRunner
 from tests.utils import hardware_test
+from vllm_omni.model_executor.models.voxcpm.voxcpm_runtime_utils import (
+    prepare_voxcpm_hf_config_dir,
+    resolve_voxcpm_model_dir,
+)
 
 VOXCPM_MODEL = os.environ.get("VOXCPM_MODEL", "OpenBMB/VoxCPM1.5")
 STAGE_CONFIG = str(
@@ -91,40 +94,9 @@ def _extract_final_multimodal_output(outputs) -> dict[str, Any]:
     raise AssertionError("No multimodal audio output found in VoxCPM generate results")
 
 
-def _resolve_voxcpm_model_dir(model: str) -> Path:
-    model_path = Path(model).expanduser()
-    if model_path.exists():
-        return model_path
-
-    from huggingface_hub import snapshot_download
-
-    return Path(snapshot_download(repo_id=model))
-
-
-def _prepare_voxcpm_hf_config_dir(model_dir: Path, hf_config_dir: Path) -> Path:
-    hf_config_dir.mkdir(parents=True, exist_ok=True)
-
-    source_config_path = model_dir / "config.json"
-    if not source_config_path.exists():
-        raise FileNotFoundError(f"VoxCPM config.json not found under {model_dir}")
-
-    config_path = hf_config_dir / "config.json"
-    shutil.copy2(source_config_path, config_path)
-
-    source_generation_config_path = model_dir / "generation_config.json"
-    if source_generation_config_path.exists():
-        shutil.copy2(source_generation_config_path, hf_config_dir / "generation_config.json")
-
-    config_dict = json.loads(config_path.read_text(encoding="utf-8"))
-    config_dict["model_type"] = "voxcpm"
-    config_dict.setdefault("architectures", ["VoxCPMForConditionalGeneration"])
-    config_path.write_text(json.dumps(config_dict, indent=2, ensure_ascii=False), encoding="utf-8")
-    return hf_config_dir
-
-
 @pytest.fixture
 def voxcpm_model_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
-    model_dir = _resolve_voxcpm_model_dir(VOXCPM_MODEL)
+    model_dir = resolve_voxcpm_model_dir(VOXCPM_MODEL)
 
     hf_config_env = os.environ.get("VLLM_OMNI_VOXCPM_HF_CONFIG_PATH")
     if hf_config_env:
@@ -133,7 +105,7 @@ def voxcpm_model_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
         hf_config_dir = tmp_path / "voxcpm_hf_config"
 
     if not (hf_config_dir / "config.json").exists():
-        _prepare_voxcpm_hf_config_dir(model_dir, hf_config_dir)
+        prepare_voxcpm_hf_config_dir(model_dir, hf_config_dir)
 
     monkeypatch.setenv("VLLM_OMNI_VOXCPM_HF_CONFIG_PATH", str(hf_config_dir))
     return str(model_dir)
@@ -145,7 +117,7 @@ def test_prepare_voxcpm_hf_config_dir(tmp_path: Path):
     (model_dir / "config.json").write_text(json.dumps({"hidden_size": 1024}), encoding="utf-8")
     (model_dir / "generation_config.json").write_text(json.dumps({"do_sample": False}), encoding="utf-8")
 
-    hf_config_dir = _prepare_voxcpm_hf_config_dir(model_dir, tmp_path / "voxcpm_hf_config")
+    hf_config_dir = prepare_voxcpm_hf_config_dir(model_dir, tmp_path / "voxcpm_hf_config")
 
     prepared_config = json.loads((hf_config_dir / "config.json").read_text(encoding="utf-8"))
     assert prepared_config["model_type"] == "voxcpm"
@@ -157,7 +129,7 @@ def test_resolve_voxcpm_model_dir_local_path(tmp_path: Path):
     model_dir = tmp_path / "OpenBMB" / "VoxCPM1.5"
     model_dir.mkdir(parents=True)
 
-    assert _resolve_voxcpm_model_dir(str(model_dir)) == model_dir
+    assert resolve_voxcpm_model_dir(str(model_dir)) == model_dir
 
 
 @pytest.mark.core_model

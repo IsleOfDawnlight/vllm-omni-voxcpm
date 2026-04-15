@@ -32,6 +32,7 @@ from .voxcpm_loader import (
     _prepare_runtime_model_dir,
     _resolve_runtime_device,
 )
+from .voxcpm_runtime_utils import resolve_voxcpm_model_dir
 from .voxcpm_stage_wrappers import _DirectVoxCPMAudioVAE, _DirectVoxCPMLatentGenerator
 
 logger = init_logger(__name__)
@@ -322,7 +323,8 @@ def _load_native_voxcpm_model(
     dtype: str | None,
 ):
     VoxCPMModel = _import_voxcpm_model_class()
-    runtime_model_path = _prepare_runtime_model_dir(model_path, target_device=device, target_dtype=dtype)
+    model_dir = resolve_voxcpm_model_dir(model_path)
+    runtime_model_path = _prepare_runtime_model_dir(model_dir, target_device=device, target_dtype=dtype)
 
     if device.type == "npu" and hasattr(torch, "npu"):
         torch.npu.set_device(device)
@@ -349,7 +351,8 @@ def _load_native_voxcpm_audio_vae(
     device: torch.device,
 ) -> _DirectVoxCPMAudioVAE:
     AudioVAE, AudioVAEConfig = _import_voxcpm_audio_vae_classes()
-    runtime_model_path = _prepare_runtime_model_dir(model_path, target_device=device, target_dtype="float32")
+    model_dir = resolve_voxcpm_model_dir(model_path)
+    runtime_model_path = _prepare_runtime_model_dir(model_dir, target_device=device, target_dtype="float32")
     config_dict = json.loads((Path(runtime_model_path) / "config.json").read_text())
     audio_vae_config = config_dict.get("audio_vae_config")
     audio_vae = AudioVAE(config=AudioVAEConfig(**audio_vae_config)) if audio_vae_config is not None else AudioVAE()
