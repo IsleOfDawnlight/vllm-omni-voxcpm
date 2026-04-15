@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import tests.conftest as omni_test_conftest
 import torch
 
 from tests.conftest import OmniRunner
@@ -18,6 +19,22 @@ STAGE_CONFIG = str(
     Path(__file__).parent.parent.parent.parent / "vllm_omni" / "model_executor" / "stage_configs" / "voxcpm.yaml"
 )
 SAMPLE_RATE = 24000
+
+
+@pytest.fixture(autouse=True)
+def _patch_npu_cleanup_for_voxcpm(monkeypatch: pytest.MonkeyPatch):
+    """Limit the NPU cleanup workaround to this VoxCPM test module only."""
+    original_cleanup = omni_test_conftest.cleanup_dist_env_and_memory
+
+    def _safe_cleanup() -> None:
+        try:
+            original_cleanup()
+        except RuntimeError as exc:
+            if "Allocator for npu is not a DeviceAllocator" in str(exc):
+                return
+            raise
+
+    monkeypatch.setattr(omni_test_conftest, "cleanup_dist_env_and_memory", _safe_cleanup)
 
 
 def _build_prompt(text: str) -> dict[str, Any]:
