@@ -66,6 +66,24 @@ _GENDER_PIPELINE_LOCK = threading.Lock()
 _PCM_SPEECH_SAMPLE_RATE_HZ = 24_000
 
 
+def _safe_cleanup_dist_env_and_memory() -> None:
+    """Best-effort cleanup for test isolation across accelerator backends.
+
+    PyTorch's generic ``torch.accelerator.empty_cache()`` path can raise on
+    Ascend/NPU because its allocator is not wired as a ``DeviceAllocator``.
+    Tests should not fail before model init just because cleanup is a no-op on
+    that backend.
+    """
+    try:
+        cleanup_dist_env_and_memory()
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "Allocator for npu is not a DeviceAllocator" in msg:
+            logger.warning("Skip cleanup_dist_env_and_memory() on NPU: %s", msg)
+            return
+        raise
+
+
 class OmniServerParams(NamedTuple):
     model: str
     port: int | None = None
@@ -1437,7 +1455,7 @@ class OmniServer:
     ) -> None:
         _run_pre_test_cleanup(enable_force=True)
         _run_post_test_cleanup(enable_force=True)
-        cleanup_dist_env_and_memory()
+        _safe_cleanup_dist_env_and_memory()
         self.model = model
         self.serve_args = serve_args
         self.env_dict = env_dict
@@ -1562,7 +1580,7 @@ class OmniServer:
             self._kill_process_tree(self.proc.pid)
         _run_pre_test_cleanup(enable_force=True)
         _run_post_test_cleanup(enable_force=True)
-        cleanup_dist_env_and_memory()
+        _safe_cleanup_dist_env_and_memory()
 
 
 class OmniServerStageCli(OmniServer):
@@ -1739,7 +1757,7 @@ class OmniServerStageCli(OmniServer):
                 self._kill_process_tree(proc.pid)
         _run_pre_test_cleanup(enable_force=True)
         _run_post_test_cleanup(enable_force=True)
-        cleanup_dist_env_and_memory()
+        _safe_cleanup_dist_env_and_memory()
 
 
 def pytest_addoption(parser):
@@ -2912,7 +2930,7 @@ class OmniRunner:
             stage_configs_path: Optional path to YAML stage config file
             **kwargs: Additional arguments passed to Omni
         """
-        cleanup_dist_env_and_memory()
+        _safe_cleanup_dist_env_and_memory()
         _run_pre_test_cleanup(enable_force=True)
         _run_post_test_cleanup(enable_force=True)
         self.model_name = model_name
@@ -3270,7 +3288,7 @@ class OmniRunner:
         self._cleanup_process()
         _run_pre_test_cleanup(enable_force=True)
         _run_post_test_cleanup(enable_force=True)
-        cleanup_dist_env_and_memory()
+        _safe_cleanup_dist_env_and_memory()
 
 
 @pytest.fixture(scope="module")
